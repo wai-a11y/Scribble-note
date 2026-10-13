@@ -116,7 +116,7 @@
   .dropdown{
     position:absolute;right:0;top:calc(100% + 8px);
     background:#111827;border:1px solid rgba(255,255,255,.1);
-    border-radius:12px;padding:6px;min-width:235px;
+    border-radius:12px;padding:6px;min-width:255px;
     box-shadow:0 20px 40px rgba(0,0,0,.55);
     display:none;flex-direction:column;gap:2px;z-index:50;
   }
@@ -126,7 +126,7 @@
     font-size:14px;color:#dbe4f3;display:flex;align-items:center;gap:9px;width:100%;
   }
   .dropdown button:hover{background:rgba(255,255,255,.08)}
-  .dropdown svg{width:16px;height:16px;color:#7f93ad}
+  .dropdown svg{width:16px;height:16px;color:#7f93ad;flex-shrink:0}
   .check{
     display:flex;align-items:center;gap:9px;padding:10px;
     font-size:13px;color:#9fb0c9;cursor:pointer;
@@ -142,6 +142,8 @@
     flex:1;min-height:0;
     display:flex;justify-content:center;
     padding:16px 16px 82px;
+    position:relative;
+    overflow:hidden;
   }
   body.two-page .stage{padding:12px 12px 78px}
 
@@ -151,7 +153,34 @@
     max-width:1400px;
     display:flex;
     gap:18px;
+    will-change:transform,opacity;
   }
+  /* Page turn animations */
+  .book.turn-next{
+    animation:turnNext .38s cubic-bezier(.4,0,.2,1);
+  }
+  .book.turn-prev{
+    animation:turnPrev .38s cubic-bezier(.4,0,.2,1);
+  }
+  @keyframes turnNext{
+    0%   { transform:translateX(0);    opacity:1; }
+    45%  { transform:translateX(-40px); opacity:.35; }
+    55%  { transform:translateX(40px);  opacity:.35; }
+    100% { transform:translateX(0);    opacity:1; }
+  }
+  @keyframes turnPrev{
+    0%   { transform:translateX(0);    opacity:1; }
+    45%  { transform:translateX(40px);  opacity:.35; }
+    55%  { transform:translateX(-40px); opacity:.35; }
+    100% { transform:translateX(0);    opacity:1; }
+  }
+
+  /* Drag feedback while swiping */
+  .book.dragging{
+    transition:none;
+    animation:none;
+  }
+
   .page-wrap{
     flex:1 1 0;
     min-width:0;min-height:0;
@@ -265,7 +294,6 @@
   .pager #delPage{color:#fca5a5}
   .pager #delPage:hover{background:rgba(239,68,68,.18)}
 
-  /* Saving indicator */
   .saving{
     position:fixed;
     top:8px;left:50%;transform:translateX(-50%);
@@ -276,6 +304,30 @@
     opacity:0;transition:opacity .2s;pointer-events:none;
   }
   .saving.show{opacity:1}
+
+  .busy{
+    position:fixed;inset:0;
+    display:none;place-items:center;
+    background:rgba(10,15,26,.75);
+    backdrop-filter:blur(4px);
+    -webkit-backdrop-filter:blur(4px);
+    z-index:80;
+  }
+  .busy.show{display:grid}
+  .busy .box{
+    padding:16px 22px;border-radius:12px;
+    background:rgba(17,24,39,.95);
+    border:1px solid rgba(255,255,255,.12);
+    text-align:center;font-size:14px;
+    box-shadow:0 20px 50px rgba(0,0,0,.6);
+  }
+  .busy .spinner{
+    width:26px;height:26px;margin:0 auto 10px;
+    border:3px solid rgba(255,255,255,.18);
+    border-top-color:#60a5fa;border-radius:50%;
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin{ to { transform:rotate(360deg); } }
 
   @media (max-width:640px){
     .toolbar{gap:6px;padding:8px 10px}
@@ -365,11 +417,15 @@
     <div class="dropdown" id="dropdown">
       <button data-export="png">
         <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        Download as PNG
+        Download current view as PNG
       </button>
       <button data-export="pdf">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Download as PDF
+        Download current view as PDF
+      </button>
+      <button data-export="pdf-all">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="14" x2="15" y2="14"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
+        Download ALL pages as PDF
       </button>
       <label class="check">
         <input type="checkbox" id="withLines" checked>
@@ -384,7 +440,7 @@
   </div>
 </div>
 
-<div class="stage">
+<div class="stage" id="stage">
   <div class="book" id="book"></div>
 </div>
 
@@ -407,11 +463,19 @@
 
 <div class="saving" id="savingBadge">Saved</div>
 
+<div class="busy" id="busy">
+  <div class="box">
+    <div class="spinner"></div>
+    <div id="busyText">Building PDF…</div>
+  </div>
+</div>
+
 <script>
 (() => {
   'use strict';
 
   const book       = document.getElementById('book');
+  const stage      = document.getElementById('stage');
   const sizeEl     = document.getElementById('size');
   const sizeLbl    = document.getElementById('sizeLabel');
   const undoBtn    = document.getElementById('undo');
@@ -431,12 +495,16 @@
   const layoutBtn  = document.getElementById('layoutBtn');
   const layoutLbl  = document.getElementById('layoutLabel');
   const savingBadge= document.getElementById('savingBadge');
+  const busy       = document.getElementById('busy');
+  const busyText   = document.getElementById('busyText');
 
   const RULED       = 32;
   const HANDLE_SIZE = 11;
   const HANDLE_HIT  = 14;
   const MIN_SIDE    = 30;
   const TWO_PAGE_MQ = '(min-width: 560px)';
+  const SWIPE_MIN   = 60;    // px horizontal travel to trigger page turn
+  const SWIPE_MAX_Y = 70;    // px vertical tolerance (must be mostly horizontal)
 
   const toolSizes = { pen: 3, highlighter: 18, eraser: 24 };
 
@@ -484,7 +552,6 @@
   }
 
   function serializeStrokes() {
-    // Convert images to dataURLs so they can be stored
     const out = [];
     for (const s of state.strokes) {
       if (s.kind === 'image') {
@@ -493,7 +560,7 @@
           page: s.page,
           x: s.x, y: s.y, w: s.w, h: s.h,
           aspect: s.aspect,
-          src: s.src || (s._src || '')   // src was stored when it was created
+          src: s.src || ''
         });
       } else {
         out.push({
@@ -562,7 +629,6 @@
     badgeTimer = setTimeout(() => savingBadge.classList.remove('show'), 900);
   }
 
-  // Save on hide / unload so folding or switching apps never loses data
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) saveDoc();
   });
@@ -1227,6 +1293,111 @@
   });
 
   /* ============================================================
+     Swipe-to-turn gesture (touch/pen only)
+     ============================================================ */
+  const swipe = {
+    active: false,
+    startX: 0, startY: 0,
+    dx: 0, dy: 0,
+    pointerId: null,
+    startTime: 0
+  };
+
+  stage.addEventListener('pointerdown', (e) => {
+    // Ignore if the pointer started on an active element
+    if (e.pointerType === 'mouse') return;
+    if (state.current || state.dragMode) return;   // busy drawing
+    swipe.active = true;
+    swipe.pointerId = e.pointerId;
+    swipe.startX = e.clientX;
+    swipe.startY = e.clientY;
+    swipe.dx = 0; swipe.dy = 0;
+    swipe.startTime = Date.now();
+    book.classList.add('dragging');
+    book.style.transform = '';
+  }, { passive: true });
+
+  stage.addEventListener('pointermove', (e) => {
+    if (!swipe.active || e.pointerId !== swipe.pointerId) return;
+    swipe.dx = e.clientX - swipe.startX;
+    swipe.dy = e.clientY - swipe.startY;
+
+    // If we start drawing instead, cancel the swipe
+    if (state.current) {
+      swipe.active = false;
+      book.classList.remove('dragging');
+      book.style.transform = '';
+      return;
+    }
+
+    // Only respond to mostly horizontal gestures
+    if (Math.abs(swipe.dy) > SWIPE_MAX_Y && Math.abs(swipe.dx) < SWIPE_MIN) {
+      return;
+    }
+    // Live drag feedback (resisted, capped)
+    const capped = Math.max(-90, Math.min(90, swipe.dx * 0.45));
+    book.style.transform = `translateX(${capped}px)`;
+  }, { passive: true });
+
+  function endSwipe(e) {
+    if (!swipe.active) return;
+    if (e && swipe.pointerId !== null && e.pointerId !== swipe.pointerId) return;
+
+    const dx = swipe.dx;
+    const dy = swipe.dy;
+    const dt = Date.now() - swipe.startTime;
+    const velocity = Math.abs(dx) / Math.max(1, dt);   // px per ms
+
+    swipe.active = false;
+    swipe.pointerId = null;
+    book.classList.remove('dragging');
+    book.style.transform = '';
+
+    // Decide direction
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    const distanceOK = Math.abs(dx) > SWIPE_MIN;
+    const velocityOK = velocity > 0.35 && Math.abs(dx) > 25;
+    const verticalOK = Math.abs(dy) < SWIPE_MAX_Y;
+
+    if (!horizontal || !verticalOK || (!distanceOK && !velocityOK)) return;
+
+    if (dx < 0) {
+      // Swipe left → next
+      if (state.twoPage) {
+        const spread = Math.floor(state.currentPage / 2);
+        if ((spread + 1) * 2 < pages.length || ((spread + 1) * 2 === pages.length)) {
+          // allow landing on last single-page spread if it exists
+        }
+      }
+      if (!nextBtn.disabled) {
+        animateTurn('next');
+        nextBtn.click();
+      }
+    } else {
+      if (!prevBtn.disabled) {
+        animateTurn('prev');
+        prevBtn.click();
+      }
+    }
+  }
+
+  stage.addEventListener('pointerup', endSwipe);
+  stage.addEventListener('pointercancel', endSwipe);
+  stage.addEventListener('pointerleave', (e) => {
+    if (swipe.active) endSwipe(e);
+  });
+
+  function animateTurn(direction) {
+    book.classList.remove('turn-next', 'turn-prev');
+    // Force reflow so the animation restarts even if it just played
+    void book.offsetWidth;
+    book.classList.add(direction === 'next' ? 'turn-next' : 'turn-prev');
+    setTimeout(() => {
+      book.classList.remove('turn-next', 'turn-prev');
+    }, 420);
+  }
+
+  /* ============================================================
      Save menu
      ============================================================ */
   saveBtn.addEventListener('click', (e) => {
@@ -1251,7 +1422,7 @@
   });
 
   /* ============================================================
-     Export
+     Export — single view or all pages
      ============================================================ */
   function addNoise(c, W, H) {
     const TS = 140;
@@ -1325,6 +1496,33 @@
     c.restore();
   }
 
+  // Render one page onto a canvas and return its JPEG data
+  function renderPageToJPEG(pi, withLines, withNumbers, scale) {
+    const pg = pages[pi];
+    if (!pg) return null;
+
+    const wCss = pg.board.width / pg.dpr;
+    const hCss = pg.board.height / pg.dpr;
+
+    const out = document.createElement('canvas');
+    out.width  = Math.round(wCss * scale);
+    out.height = Math.round(hCss * scale);
+    const c = out.getContext('2d');
+
+    paintParchment(c, out.width, out.height, scale, withLines, hCss);
+
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(pg.board, 0, 0, out.width, out.height);
+
+    if (withNumbers) drawPageNumber(c, out.width, out.height, scale, pi + 1);
+
+    const dataUrl = out.toDataURL('image/jpeg', 0.92);
+    const jpegBytes = base64ToBytes(dataUrl.split(',')[1]);
+    return { bytes: jpegBytes, w: out.width, h: out.height };
+  }
+
+  // Compose multiple pages side-by-side onto one canvas (for "current view")
   function compose(pageList, withLines, withNumbers, scale) {
     const pg0  = pages[pageList[0]];
     const wCss = pg0.board.width / pg0.dpr;
@@ -1389,13 +1587,42 @@
     state.selectedIndex = -1;
     drawAllOverlays();
 
-    const pageList = getExportPages().filter(i => pages[i]);
-    if (!pageList.length) return;
-
     const withLines   = linesCb.checked;
     const withNumbers = numbersCb.checked;
-    const out  = compose(pageList, withLines, withNumbers, 2);
     const base = 'note-' + timestamp();
+
+    /* ---------- PDF containing ALL pages ---------- */
+    if (type === 'pdf-all') {
+      busyText.textContent = 'Building PDF…';
+      busy.classList.add('show');
+
+      // Give the browser a frame to paint the busy overlay first
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          try {
+            const scale = 2;
+            const jpegPages = [];
+            for (let i = 0; i < pages.length; i++) {
+              const j = renderPageToJPEG(i, withLines, withNumbers, scale);
+              if (j) jpegPages.push(j);
+            }
+            const blob = buildMultiPagePDF(jpegPages);
+            download(blob, base + '-all.pdf');
+          } catch (err) {
+            console.error(err);
+            alert('Could not build the PDF: ' + err.message);
+          } finally {
+            busy.classList.remove('show');
+          }
+        }, 40);
+      });
+      return;
+    }
+
+    /* ---------- Single view ---------- */
+    const pageList = getExportPages().filter(i => pages[i]);
+    if (!pageList.length) return;
+    const out = compose(pageList, withLines, withNumbers, 2);
 
     if (type === 'png') {
       out.toBlob((blob) => { if (blob) download(blob, base + '.png'); }, 'image/png');
@@ -1414,50 +1641,132 @@
     return arr;
   }
 
+  /* ---------- Single-image PDF (kept for "current view") ---------- */
   function buildPDF(jpegBytes, imgW, imgH) {
+    return buildMultiPagePDF([{ bytes: jpegBytes, w: imgW, h: imgH }]);
+  }
+
+  /* ---------- Multi-page PDF ----------
+     Each page is one JPEG image. We fit each image onto a
+     standard page (A4 landscape or portrait, depending on aspect)
+     while preserving the image's aspect ratio.
+  ---------------------------------------- */
+  function buildMultiPagePDF(jpegPages) {
+    if (!jpegPages || !jpegPages.length) {
+      throw new Error('No pages to export.');
+    }
+
     const enc = new TextEncoder();
     const parts = [];
     let size = 0;
-    const offsets = [0, 0, 0, 0, 0, 0];
-
     const add = (d) => {
       const b = (d instanceof Uint8Array) ? d : enc.encode(d);
       parts.push(b); size += b.length;
     };
 
+    // Header (with binary marker)
     add(new Uint8Array([0x25,0x50,0x44,0x46,0x2D,0x31,0x2E,0x34,0x0A,0x25,0xE2,0xE3,0xCF,0xD3,0x0A]));
 
-    let pageW, pageH;
-    if (imgW >= imgH) { pageW = 841.89; pageH = pageW * imgH / imgW; }
-    else              { pageW = 595.28; pageH = pageW * imgH / imgW; }
-    pageW = +pageW.toFixed(2);
-    pageH = +pageH.toFixed(2);
+    // Object numbering:
+    //   1 = Catalog
+    //   2 = Pages
+    //   3..N+2 = Page objects
+    //   N+3.. = Image XObjects,  then each content stream
+    //   (we interleave: for each page i, image = 3+N+i, content = 3+2N+i)
+    const N = jpegPages.length;
 
-    const content = `q\n${pageW} 0 0 ${pageH} 0 0 cm\n/Im0 Do\nQ\n`;
-    const contentBytes = enc.encode(content);
+    const objCatalog   = 1;
+    const objPages     = 2;
+    const pageObjBase  = 3;
+    const imageObjBase = 3 + N;
+    const contentBase  = 3 + 2 * N;
 
-    offsets[1] = size;
-    add('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
-    offsets[2] = size;
-    add('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
-    offsets[3] = size;
-    add(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] `
-      + `/Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n`);
-    offsets[4] = size;
-    add(`4 0 obj\n<< /Length ${contentBytes.length} >>\nstream\n`);
-    add(contentBytes);
-    add('\nendstream\nendobj\n');
-    offsets[5] = size;
-    add(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imgW} /Height ${imgH} `
-      + `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`);
-    add(jpegBytes);
-    add('\nendstream\nendobj\n');
+    // Precompute page dimensions (fit to A4)
+    const A4_LONG  = 841.89;
+    const A4_SHORT = 595.28;
 
+    const pageDims = jpegPages.map((jp) => {
+      const long  = Math.max(jp.w, jp.h);
+      const short = Math.min(jp.w, jp.h);
+      let pageW, pageH;
+      if (jp.w >= jp.h) {
+        pageW = A4_LONG; pageH = A4_LONG * jp.h / jp.w;
+      } else {
+        pageW = A4_SHORT; pageH = A4_SHORT * jp.h / jp.w;
+      }
+      return { W: +pageW.toFixed(2), H: +pageH.toFixed(2) };
+    });
+
+    // Build objects and track byte offsets
+    const offsets = {};
+
+    function writeObj(num, body) {
+      offsets[num] = size;
+      add(`${num} 0 obj\n${body}\nendobj\n`);
+    }
+
+    // 1: Catalog
+    writeObj(objCatalog, `<< /Type /Catalog /Pages ${objPages} 0 R >>`);
+
+    // 2: Pages (kids = every page object)
+    const kids = [];
+    for (let i = 0; i < N; i++) kids.push(`${pageObjBase + i} 0 R`);
+    writeObj(objPages, `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${N} >>`);
+
+    // 3..3+N-1: Page objects
+    for (let i = 0; i < N; i++) {
+      const imgNum = imageObjBase + i;
+      const cNum   = contentBase + i;
+      const { W, H } = pageDims[i];
+      writeObj(
+        pageObjBase + i,
+        `<< /Type /Page /Parent ${objPages} 0 R /MediaBox [0 0 ${W} ${H}] `
+        + `/Resources << /XObject << /Im0 ${imgNum} 0 R >> >> /Contents ${cNum} 0 R >>`
+      );
+    }
+
+    // Image XObjects
+    for (let i = 0; i < N; i++) {
+      const jp = jpegPages[i];
+      const num = imageObjBase + i;
+      offsets[num] = size;
+      add(`${num} 0 obj\n`);
+      add(`<< /Type /XObject /Subtype /Image /Width ${jp.w} /Height ${jp.h} `
+        + `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jp.bytes.length} >>\n`);
+      add('stream\n');
+      add(jp.bytes);
+      add('\nendstream\nendobj\n');
+    }
+
+    // Content streams (one per page: draws the image full-bleed to the page)
+    for (let i = 0; i < N; i++) {
+      const { W, H } = pageDims[i];
+      const content = `q\n${W} 0 0 ${H} 0 0 cm\n/Im0 Do\nQ\n`;
+      const cb = enc.encode(content);
+      const num = contentBase + i;
+      offsets[num] = size;
+      add(`${num} 0 obj\n`);
+      add(`<< /Length ${cb.length} >>\nstream\n`);
+      add(cb);
+      add('\nendstream\nendobj\n');
+    }
+
+    // xref table
     const xrefPos = size;
-    let xref = 'xref\n0 6\n0000000000 65535 f \n';
-    for (let i = 1; i <= 5; i++) xref += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+    const totalObjects = 2 + 2 * N + 1;   // 0 + catalog + pages + N pages + N images + N contents
+    // Actually count: 0 (free) + 1 catalog + 1 pages + N page + N image + N content = 3 + 3N
+    const count = 3 + 3 * N;
+
+    let xref = `xref\n0 ${count}\n`;
+    xref += '0000000000 65535 f \n';
+    for (let i = 1; i < count; i++) {
+      const off = offsets[i] || 0;
+      xref += String(off).padStart(10, '0') + ' 00000 n \n';
+    }
     add(xref);
-    add(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`);
+
+    // Trailer
+    add(`trailer\n<< /Size ${count} /Root ${objCatalog} 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`);
 
     return new Blob(parts, { type: 'application/pdf' });
   }
@@ -1529,9 +1838,9 @@
   function updateExportNote() {
     const vis = getExportPages();
     if (vis.length > 1) {
-      exportNote.textContent = `Exports pages ${vis[0] + 1}–${vis[vis.length - 1] + 1}.`;
+      exportNote.textContent = `Current view: pages ${vis[0] + 1}–${vis[vis.length - 1] + 1}.`;
     } else {
-      exportNote.textContent = `Exports page ${vis[0] + 1}.`;
+      exportNote.textContent = `Current view: page ${vis[0] + 1}.`;
     }
   }
 
@@ -1604,17 +1913,12 @@
     afterNav();
   });
 
-  // Add: 1 page in single mode, 2 pages in spread mode
   addBtn.addEventListener('click', () => {
     const n = state.twoPage ? 2 : 1;
-    let lastAdded = null;
-    for (let i = 0; i < n; i++) lastAdded = addPage(false);
+    for (let i = 0; i < n; i++) addPage(false);
 
-    // In spread mode, jump to the spread that contains the new page
     if (state.twoPage) {
-      // Land on the first page of the newly added spread
       state.currentPage = pages.length - n;
-      // Round to even so the spread reads naturally
       if (state.currentPage % 2 !== 0) state.currentPage -= 1;
     } else {
       state.currentPage = pages.length - 1;
@@ -1628,7 +1932,6 @@
   delBtn.addEventListener('click', () => {
     if (pages.length <= 1) return;
 
-    // In spread mode, delete both visible pages (or just one if only one is shown)
     const targets = state.twoPage ? state.visiblePages.slice().reverse() : [state.currentPage];
     const label = targets.length > 1
       ? `pages ${Math.min(...targets) + 1}–${Math.max(...targets) + 1}`
@@ -1684,25 +1987,23 @@
       else if (k === 'e') setTool('eraser');
       else if (k === 'i') { e.preventDefault(); fileIn.click(); }
       else if (k === 'l') { e.preventDefault(); layoutBtn.click(); }
-      else if (k === 'arrowleft')  prevBtn.click();
-      else if (k === 'arrowright') nextBtn.click();
+      else if (k === 'arrowleft')  { animateTurn('prev'); prevBtn.click(); }
+      else if (k === 'arrowright') { animateTurn('next'); nextBtn.click(); }
     }
   });
 
   /* ============================================================
-     Boot  —  load saved data, then set up pages
+     Boot
      ============================================================ */
   async function boot() {
     db = await openDB();
     const saved = await loadDoc();
 
-    // Rebuild strokes from saved data
     const imageLoads = [];
 
     if (saved && Array.isArray(saved.strokes)) {
       for (const s of saved.strokes) {
         if (s.kind === 'image' && s.src) {
-          // Load the image and rebuild the element when ready
           const promise = new Promise((resolve) => {
             const img = new Image();
             img.onload = () => {
@@ -1726,7 +2027,6 @@
       }
     }
 
-    // Decide how many pages to create
     const wanted = (saved && saved.pageCount) ? Math.max(2, saved.pageCount) : 2;
 
     for (let i = 0; i < wanted; i++) addPage(false);
@@ -1742,11 +2042,9 @@
     updateHistoryButtons();
     updateHints();
 
-    // Draw whatever we have now (strokes will appear; images as they load)
     redrawAll();
     drawAllOverlays();
 
-    // When images finish, redraw them
     Promise.all(imageLoads).then(() => {
       redrawAll();
       drawAllOverlays();
