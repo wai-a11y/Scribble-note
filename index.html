@@ -232,13 +232,11 @@
   .board{touch-action:none;cursor:crosshair;z-index:1}
   .overlay{pointer-events:none;z-index:2}
 
-  /* Text layer sits ABOVE the canvas when the text tool is active */
   .text-layer{
     position:absolute;inset:0;
     z-index:5;
     pointer-events:none;
   }
-  body.text-mode .text-layer{pointer-events:none}
   body.text-mode .board,
   body.text-mode .overlay{cursor:text}
 
@@ -257,7 +255,6 @@
     user-select:text;
     -webkit-user-select:text;
     pointer-events:auto;
-    /* Prevent the browser from zooming the page on focus on iOS */
     font-size:16px;
   }
   .text-item:hover{ border-color:rgba(37,99,235,.35); }
@@ -353,7 +350,6 @@
   }
   @keyframes spin{ to { transform:rotate(360deg); } }
 
-  /* Toast for status messages */
   .toast{
     position:fixed;
     bottom:76px;left:50%;transform:translateX(-50%) translateY(20px);
@@ -564,14 +560,17 @@
   const SWIPE_MIN   = 60;
   const SWIPE_MAX_Y = 70;
 
-  const toolSizes = { pen: 3, highlighter: 18, eraser: 24, text: 3 };
+  // Pen-side size in 1..48 slider units.
+  const toolSizes = { pen: 3, highlighter: 18, eraser: 24 };
+  // Text-side size — INDEPENDENT of the pen size slider values above.
+  let textSize = 3;
 
   const supportsSavePicker = typeof window.showSaveFilePicker === 'function';
 
   const state = {
     tool: 'pen',
     color: '#2b1a0e',
-    size: 3,
+    size: 3,                 // the CURRENT brush size (pen/highlighter/eraser)
     strokes: [],
     texts: [],
     redo: [],
@@ -665,11 +664,12 @@
     if (!db) return;
     try {
       const data = {
-        version: 2,
+        version: 3,
         savedAt: Date.now(),
         pageCount: pages.length,
         currentPage: state.currentPage,
         layoutMode: state.layoutMode,
+        textSize: textSize,
         strokes: serializeStrokes(),
         texts: serializeTexts()
       };
@@ -853,7 +853,7 @@
   }
 
   /* ============================================================
-     Rendering — strokes + images on canvas
+     Rendering
      ============================================================ */
   function redrawPage(pg) {
     const ctx = pg.ctx, dpr = pg.dpr;
@@ -941,12 +941,12 @@
   /* ============================================================
      Text layer
      ============================================================ */
+  // textFontSize takes a text item's own size value, NOT state.size
   function textFontSize(t) {
     return Math.max(12, t.size * 5);
   }
 
   function buildTextElement(t) {
-    // Use a textarea so mobile keyboards reliably appear and allow multiline
     const el = document.createElement('textarea');
     el.className = 'text-item';
     el.spellcheck = false;
@@ -966,17 +966,22 @@
     el.style.whiteSpace = 'pre-wrap';
     el.style.outline = 'none';
 
-    // Auto-size height to content
     const autosize = () => {
       el.style.height = 'auto';
       el.style.height = (el.scrollHeight) + 'px';
     };
 
-    // Initial width based on content + a comfortable typing area
     const initialWidth = Math.max(120, Math.min(420, Math.round((t.text || ' ').length * textFontSize(t) * 0.6) + 40));
     el.style.width = initialWidth + 'px';
 
-    el.addEventListener('focus', () => { state.selectedTextId = t.id; });
+    el.addEventListener('focus', () => {
+      state.selectedTextId = t.id;
+      // When a text box is focused, "the current size" becomes the text size.
+      // This means picking a color or nudging the slider afterwards will
+      // affect the TEXT, not the pen.
+      sizeEl.value = textSize;
+      sizeLbl.textContent = textSize;
+    });
 
     el.addEventListener('blur', () => {
       const newText = el.value.replace(/\n+$/, '');
@@ -988,6 +993,7 @@
         t.y = parseFloat(el.style.top)  || t.y;
         scheduleSave();
       }
+      state.selectedTextId = null;
     });
 
     el.addEventListener('input', () => {
@@ -997,24 +1003,17 @@
     });
 
     el.addEventListener('keydown', (e) => {
-      // Let keyboard shortcuts inside the box work naturally
       if (e.key === 'Escape') { el.blur(); }
-      // Ctrl/Cmd+Enter commits
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         el.blur();
       }
     });
 
-    // Prevent drawing when tapping inside the box
     el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
-
-    // Prevent the whole app from scrolling when the box is focused
     el.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: true });
 
-    // Initial autosize once it's in the DOM
     requestAnimationFrame(autosize);
-
     return el;
   }
 
@@ -1032,10 +1031,6 @@
     }
   }
 
-  /* ============================================================
-     Add text — triggered from a user gesture so the keyboard
-     appears reliably on mobile
-     ============================================================ */
   function addTextAt(pageIndex, x, y) {
     const id = (state.texts.reduce((m, t) => Math.max(m, t.id || 0), 0) || 0) + 1;
     const t = {
@@ -1045,7 +1040,8 @@
       x, y,
       text: '',
       color: state.color,
-      size: state.size,
+      // Text uses its OWN size value — never state.size
+      size: textSize,
       font: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
     };
     state.texts.push(t);
@@ -1057,11 +1053,7 @@
     pg.textLayer.appendChild(el);
     pg.hint.classList.add('hide');
 
-    // Force focus IMMEDIATELY in the same user-gesture call stack.
-    // This is the fix that makes the mobile keyboard appear.
     el.focus({ preventScroll: true });
-
-    // If focus didn't take (some browsers), try again next frame
     if (document.activeElement !== el) {
       requestAnimationFrame(() => {
         try { el.focus({ preventScroll: true }); } catch (_) {}
@@ -1168,13 +1160,11 @@
 
     const p = pointFrom(e, pg);
 
-    // Text tool: create a new text box right where the user tapped
     if (state.tool === 'text') {
       if (state.selectedIndex >= 0) {
         state.selectedIndex = -1;
         drawAllOverlays();
       }
-      // Offsets so the box appears with its top-left near the tap point
       addTextAt(pg.index, Math.max(0, p.x - 8), Math.max(0, p.y - 10));
       return;
     }
@@ -1413,9 +1403,16 @@
     if (t === state.tool) return;
     toolSizes[state.tool] = state.size;
     state.tool = t;
-    state.size = toolSizes[t] || 3;
-    sizeEl.value = state.size;
-    sizeLbl.textContent = state.size;
+
+    if (t === 'text') {
+      // Slider shows text size, not brush size
+      sizeEl.value = textSize;
+      sizeLbl.textContent = textSize;
+    } else {
+      state.size = toolSizes[t] || 3;
+      sizeEl.value = state.size;
+      sizeLbl.textContent = state.size;
+    }
 
     document.querySelectorAll('.tool').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === t));
@@ -1437,20 +1434,33 @@
     btn.addEventListener('click', () => setTool(btn.dataset.tool));
   });
 
+  // The size slider does one of two things depending on context:
+  //   - If a text box is focused → adjust the TEXT size
+  //   - Otherwise → adjust the brush size (pen/highlighter/eraser)
   sizeEl.addEventListener('input', () => {
-    state.size = +sizeEl.value;
-    toolSizes[state.tool] = state.size;
-    sizeLbl.textContent = state.size;
+    const val = +sizeEl.value;
+    sizeLbl.textContent = val;
 
-    if (state.selectedTextId != null) {
-      const t = state.texts.find(x => x.id === state.selectedTextId);
+    const focusedTextId = state.selectedTextId;
+    if (focusedTextId != null) {
+      const t = state.texts.find(x => x.id === focusedTextId);
       if (t) {
-        t.size = state.size;
+        t.size = val;
+        textSize = val;             // remember for the next text box
         const el = document.querySelector(`.text-item[data-text-id="${t.id}"]`);
-        if (el) el.style.fontSize = textFontSize(t) + 'px';
+        if (el) {
+          el.style.fontSize = textFontSize(t) + 'px';
+          el.style.height = 'auto';
+          el.style.height = el.scrollHeight + 'px';
+        }
         scheduleSave();
       }
+      return;
     }
+
+    // No text focused → this is the brush size
+    state.size = val;
+    toolSizes[state.tool] = state.size;
   });
 
   function setColor(c) {
@@ -1703,16 +1713,11 @@
         showToast('Saved to ' + handle.name);
         return;
       } catch (err) {
-        if (err && err.name === 'AbortError') {
-          // user cancelled — silently fall back to download
-          return;
-        }
+        if (err && err.name === 'AbortError') return;
         console.warn('Save picker failed, falling back to download:', err);
-        // fall through to regular download
       }
     }
 
-    // Standard browser download
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename;
@@ -1916,7 +1921,6 @@
       busyText.textContent = 'Building PDF…';
       busy.classList.add('show');
 
-      // Yield so the overlay paints first
       await new Promise(r => requestAnimationFrame(() => setTimeout(r, 30)));
 
       try {
@@ -2283,6 +2287,10 @@
       state.texts = saved.texts.filter(t => t && typeof t.text === 'string');
     }
 
+    if (saved && Number.isFinite(saved.textSize)) {
+      textSize = saved.textSize;
+    }
+
     const wanted = (saved && saved.pageCount) ? Math.max(2, saved.pageCount) : 2;
     for (let i = 0; i < wanted; i++) addPage(false);
 
@@ -2354,7 +2362,6 @@
     if (installBtn) installBtn.style.display = 'none';
   });
 
-  // Let the export note reflect save-picker availability
   if (!supportsSavePicker) {
     askCb.disabled = true;
     askCb.parentElement.title = 'Not supported in this browser — files go to Downloads.';
