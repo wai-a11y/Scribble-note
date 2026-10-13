@@ -1,0 +1,26 @@
+{
+  "name": "Scribble Notepad",
+  "short_name": "Scribble",
+  "description": "A parchment-style notepad with pen, highlighter, images and PNG/PDF export.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0f1a",
+  "theme_color": "#0a0f1a",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%230a0f1a'/%3E%3Crect x='80' y='72' width='352' height='368' rx='20' fill='%23f3dfb4'/%3E%3Cg stroke='%23b08850' stroke-opacity='0.45' stroke-width='3'%3E%3Cline x1='120' y1='150' x2='392' y2='150'/%3E%3Cline x1='120' y1='206' x2='392' y2='206'/%3E%3Cline x1='120' y1='262' x2='392' y2='262'/%3E%3Cline x1='120' y1='318' x2='392' y2='318'/%3E%3Cline x1='120' y1='374' x2='392' y2='374'/%3E%3C/g%3E%3Cpath d='M130 300 Q 170 230 210 300 T 290 300 T 370 250' fill='none' stroke='%232b1a0e' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%230a0f1a'/%3E%3Crect x='80' y='72' width='352' height='368' rx='20' fill='%23f3dfb4'/%3E%3Cg stroke='%23b08850' stroke-opacity='0.45' stroke-width='3'%3E%3Cline x1='120' y1='150' x2='392' y2='150'/%3E%3Cline x1='120' y1='206' x2='392' y2='206'/%3E%3Cline x1='120' y1='262' x2='392' y2='262'/%3E%3Cline x1='120' y1='318' x2='392' y2='318'/%3E%3Cline x1='120' y1='374' x2='392' y2='374'/%3E%3C/g%3E%3Cpath d='M130 300 Q 170 230 210 300 T 290 300 T 370 250' fill='none' stroke='%232b1a0e' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

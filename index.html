@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scribble Notepad — Foldable</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:radial-gradient(1200px 800px at 50% -10%, #1b2740 0%, #0a0f1a 60%) fixed;
+    color:#e6edf7;
+    display:flex;flex-direction:column;height:100%;
+    overflow:hidden;overscroll-behavior:none;
+    -webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  /* ---------- Toolbar ---------- */
+  .toolbar{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:10px 14px;
+    background:rgba(17,24,39,.85);
+    backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+    border-bottom:1px solid rgba(255,255,255,.08);
+    z-index:10;
+  }
+  .group{display:flex;align-items:center;gap:6px}
+  .spacer{flex:1 1 auto}
+  .divider{width:1px;height:24px;background:rgba(255,255,255,.12);margin:0 4px}
+
+  button{font:inherit;color:inherit;background:transparent;border:0;cursor:pointer}
+  .tool,.icon{
+    width:38px;height:38px;display:grid;place-items:center;
+    border-radius:10px;color:#aebbd0;
+    transition:background .15s,color .15s,transform .1s;
+  }
+  .tool:hover,.icon:hover{background:rgba(255,255,255,.08);color:#fff}
+  .tool:active,.icon:active{transform:scale(.94)}
+  .tool.active{background:#2563eb;color:#fff;box-shadow:0 4px 14px rgba(37,99,235,.45)}
+  .icon:disabled{opacity:.3;cursor:not-allowed;background:transparent}
+  svg{width:19px;height:19px;display:block;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ---------- Layout toggle ---------- */
+  .layout-btn{
+    height:34px;padding:0 10px;border-radius:8px;
+    background:rgba(255,255,255,.08);
+    color:#aebbd0;font-size:11.5px;font-weight:600;
+    display:flex;align-items:center;gap:6px;
+    letter-spacing:.3px;white-space:nowrap;
+    transition:background .15s,color .15s;
+  }
+  .layout-btn:hover{background:rgba(255,255,255,.14);color:#fff}
+  .layout-btn .dot{
+    width:8px;height:8px;border-radius:50%;
+    background:#8b9bb4;
+  }
+  .layout-btn[data-mode="one"]{background:rgba(37,99,235,.20);color:#93c5fd}
+  .layout-btn[data-mode="one"] .dot{background:#60a5fa}
+  .layout-btn[data-mode="two"]{background:rgba(37,99,235,.20);color:#93c5fd}
+  .layout-btn[data-mode="two"] .dot{background:#60a5fd;box-shadow:0 0 0 3px rgba(96,165,250,.25)}
+
+  /* ---------- Colors ---------- */
+  .colors{gap:5px}
+  .swatch{
+    width:24px;height:24px;border-radius:50%;
+    background:var(--c);
+    border:2px solid rgba(255,255,255,.22);
+    padding:0;
+    transition:transform .12s,border-color .12s;
+  }
+  .swatch:hover{transform:scale(1.12)}
+  .swatch.active{border-color:#fff;box-shadow:0 0 0 2px rgba(37,99,235,.85)}
+  .swatch.custom{
+    background:conic-gradient(#ef4444,#f59e0b,#22c55e,#06b6d4,#3b82f6,#a855f7,#ef4444);
+    position:relative;overflow:hidden;
+  }
+  .swatch.custom input{position:absolute;inset:-10px;opacity:0;cursor:pointer;width:200%;height:200%}
+
+  /* ---------- Slider ---------- */
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;
+    width:96px;height:4px;border-radius:99px;
+    background:rgba(255,255,255,.18);outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:#fff;border:0;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:16px;height:16px;border-radius:50%;background:#fff;border:0;cursor:pointer;
+  }
+  .sizeLabel{
+    font-variant-numeric:tabular-nums;font-size:12px;color:#8b9bb4;
+    min-width:22px;text-align:center;
+  }
+
+  /* ---------- Save menu ---------- */
+  .menu{position:relative}
+  .primary{
+    display:flex;align-items:center;gap:7px;
+    background:linear-gradient(180deg,#3b82f6,#2563eb);
+    color:#fff;padding:9px 14px;border-radius:10px;
+    font-weight:600;font-size:14px;
+    box-shadow:0 6px 18px rgba(37,99,235,.35);
+    transition:filter .15s,transform .1s;
+  }
+  .primary:hover{filter:brightness(1.09)}
+  .primary:active{transform:scale(.97)}
+  .primary svg{width:15px;height:15px}
+  .dropdown{
+    position:absolute;right:0;top:calc(100% + 8px);
+    background:#111827;border:1px solid rgba(255,255,255,.1);
+    border-radius:12px;padding:6px;min-width:225px;
+    box-shadow:0 20px 40px rgba(0,0,0,.55);
+    display:none;flex-direction:column;gap:2px;z-index:50;
+  }
+  .dropdown.open{display:flex}
+  .dropdown button{
+    text-align:left;padding:9px 10px;border-radius:8px;
+    font-size:14px;color:#dbe4f3;display:flex;align-items:center;gap:9px;width:100%;
+  }
+  .dropdown button:hover{background:rgba(255,255,255,.08)}
+  .dropdown svg{width:16px;height:16px;color:#7f93ad}
+  .check{
+    display:flex;align-items:center;gap:9px;padding:10px;
+    font-size:13px;color:#9fb0c9;cursor:pointer;
+    border-top:1px solid rgba(255,255,255,.08);margin-top:4px;
+  }
+  .check input{accent-color:#2563eb;width:15px;height:15px;cursor:pointer}
+  .note{
+    font-size:11.5px;color:#6b7c95;padding:6px 10px 4px;
+    border-top:1px solid rgba(255,255,255,.08);margin-top:4px;line-height:1.4;
+  }
+
+  /* ---------- Stage + Book ---------- */
+  .stage{
+    flex:1;min-height:0;
+    display:flex;justify-content:center;
+    padding:16px;
+  }
+  .book{
+    flex:1 1 auto;
+    min-width:0;min-height:0;
+    max-width:1400px;
+    display:flex;
+    gap:18px;
+  }
+  .page-wrap{
+    flex:1 1 0;
+    min-width:0;min-height:0;
+    display:none;
+  }
+  .page-wrap.active{display:flex}
+  body.two-page .page-wrap{display:flex}
+
+  /* ---------- Paper (parchment) ---------- */
+  .paper{
+    flex:1 1 auto;
+    min-width:0;
+    display:flex;
+    padding:24px;
+    border-radius:12px;
+    background-color:#f2ddb0;
+    background-image:
+      radial-gradient(circle at 18% 28%, rgba(180,140,80,.16), transparent 42%),
+      radial-gradient(circle at 76% 66%, rgba(160,120,60,.13), transparent 46%),
+      radial-gradient(circle at 46% 88%, rgba(200,170,110,.14), transparent 42%),
+      radial-gradient(circle at 88% 12%, rgba(200,170,110,.12), transparent 38%),
+      url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='180' height='180' filter='url(%23n)' opacity='0.10'/></svg>"),
+      linear-gradient(180deg,#f8ebcd 0%,#f3dfb4 55%,#ecd39c 100%);
+    box-shadow:
+      0 24px 70px rgba(0,0,0,.55),
+      0 0 0 1px rgba(120,80,30,.25),
+      inset 0 0 60px rgba(140,100,40,.20),
+      inset 0 0 14px rgba(120,80,30,.14);
+    overflow:hidden;
+  }
+  /* Book-like inner edges when in spread mode */
+  body.two-page .page-wrap:first-child .paper{
+    border-top-right-radius:3px;border-bottom-right-radius:3px;
+  }
+  body.two-page .page-wrap:last-child .paper{
+    border-top-left-radius:3px;border-bottom-left-radius:3px;
+  }
+
+  /* Tighter two-page spacing on narrower screens (foldables) */
+  body.two-page .stage{padding:12px}
+  body.two-page .book{gap:10px}
+  body.two-page .paper{padding:16px}
+  @media (max-width: 700px){
+    body.two-page .stage{padding:8px}
+    body.two-page .book{gap:6px}
+    body.two-page .paper{padding:10px;border-radius:8px}
+  }
+
+  .sheet{
+    position:relative;
+    flex:1 1 auto;min-width:0;
+    border-radius:4px;
+    background-image:repeating-linear-gradient(
+      to bottom,
+      rgba(150,110,55,.30) 0 1px,
+      transparent 1px 32px
+    );
+  }
+  .board,.overlay{
+    position:absolute;inset:0;
+    width:100%;height:100%;
+    display:block;
+  }
+  .board{touch-action:none;cursor:crosshair;z-index:1}
+  .overlay{pointer-events:none;z-index:2}
+
+  .hint{
+    position:absolute;inset:0;z-index:0;
+    display:grid;place-items:center;
+    color:rgba(140,100,50,.45);font-size:15px;letter-spacing:.3px;
+    pointer-events:none;transition:opacity .35s;
+    text-align:center;padding:0 20px;
+  }
+  .hint.hide{opacity:0}
+  .hint small{display:block;font-size:12px;margin-top:6px;opacity:.7}
+
+  /* ---------- Pager (single-page mode only) ---------- */
+  .pager{
+    position:fixed;
+    bottom:14px;left:50%;transform:translateX(-50%);
+    display:none;
+    align-items:center;gap:6px;
+    padding:6px 8px;
+    background:rgba(17,24,39,.92);
+    backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+    z-index:20;
+  }
+  body:not(.two-page) .pager{display:flex}
+  .pager button{
+    width:34px;height:34px;border-radius:50%;
+    display:grid;place-items:center;color:#cbd6e6;
+  }
+  .pager button:hover{background:rgba(255,255,255,.1)}
+  .pager button:disabled{opacity:.3;cursor:not-allowed;background:transparent}
+  .pager .label{
+    font-size:13px;font-variant-numeric:tabular-nums;
+    color:#cbd6e6;min-width:56px;text-align:center;padding:0 4px;
+  }
+  body:not(.two-page) .stage{padding-bottom:80px}
+
+  @media (max-width:640px){
+    .toolbar{gap:6px;padding:8px 10px}
+    .tool,.icon{width:34px;height:34px}
+    input[type=range]{width:70px}
+    .stage{padding:10px}
+    body:not(.two-page) .stage{padding-bottom:74px}
+    .paper{padding:14px;border-radius:10px}
+    .divider{display:none}
+    .book{gap:10px}
+    .layout-btn{padding:0 8px;font-size:11px}
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="group" role="group" aria-label="Drawing tools">
+    <button class="tool active" data-tool="pen" title="Pen (P)" aria-label="Pen">
+      <svg viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+    </button>
+    <button class="tool" data-tool="highlighter" title="Highlighter (H)" aria-label="Highlighter">
+      <svg viewBox="0 0 24 24"><path d="M9 11l-6 6v3h9l3-3"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+    </button>
+    <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser">
+      <svg viewBox="0 0 24 24"><path d="M20 20H8.5L3.7 15.2a2 2 0 0 1 0-2.8l9-9a2 2 0 0 1 2.8 0l5.5 5.5a2 2 0 0 1 0 2.8L11.5 20"/><path d="M7 12l5 5"/></svg>
+    </button>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="group">
+    <button class="icon" id="insertImg" title="Insert image (I) — or drag & drop / paste" aria-label="Insert image">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    </button>
+    <input type="file" id="fileInput" accept="image/*" hidden>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="group colors" id="colors" role="group" aria-label="Colors">
+    <button class="swatch active" data-color="#2b1a0e" style="--c:#2b1a0e" aria-label="Ink black"></button>
+    <button class="swatch" data-color="#1e3a8a" style="--c:#1e3a8a" aria-label="Blue"></button>
+    <button class="swatch" data-color="#8b1a1a" style="--c:#8b1a1a" aria-label="Crimson"></button>
+    <button class="swatch" data-color="#1f5e2a" style="--c:#1f5e2a" aria-label="Green"></button>
+    <button class="swatch" data-color="#9a6412" style="--c:#9a6412" aria-label="Amber"></button>
+    <button class="swatch" data-color="#5b2c83" style="--c:#5b2c83" aria-label="Purple"></button>
+    <label class="swatch custom" title="Custom color">
+      <input type="color" id="customColor" value="#0ea5e9" aria-label="Custom color">
+    </label>
+  </div>
+
+  <div class="group">
+    <input type="range" id="size" min="1" max="48" value="3" aria-label="Brush size">
+    <span class="sizeLabel" id="sizeLabel">3</span>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="group">
+    <button class="layout-btn" id="layoutBtn" data-mode="auto" title="Layout: Auto — tap to cycle (Auto → One page → Two pages)" aria-label="Layout mode">
+      <span class="dot"></span>
+      <span id="layoutLabel">Auto</span>
+    </button>
+    <button class="icon" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+      <svg viewBox="0 0 24 24"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+    </button>
+    <button class="icon" id="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>
+      <svg viewBox="0 0 24 24"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
+    </button>
+    <button class="icon" id="clear" title="Clear page(s)" aria-label="Clear page">
+      <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+    </button>
+  </div>
+
+  <div class="menu" id="menu">
+    <button class="primary" id="saveBtn" aria-haspopup="true" aria-expanded="false">
+      Save
+      <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="dropdown" id="dropdown">
+      <button data-export="png">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        Download as PNG
+      </button>
+      <button data-export="pdf">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Download as PDF
+      </button>
+      <label class="check">
+        <input type="checkbox" id="withLines" checked>
+        Include ruled lines
+      </label>
+      <div class="note" id="exportNote">Exports the current view.</div>
+    </div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="book" id="book">
+
+    <div class="page-wrap active" data-page="0">
+      <div class="paper">
+        <div class="sheet">
+          <div class="hint">
+            Start scribbling…
+            <small>Drag &amp; drop or paste an image anywhere</small>
+          </div>
+          <canvas class="board"></canvas>
+          <canvas class="overlay"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-wrap" data-page="1">
+      <div class="paper">
+        <div class="sheet">
+          <div class="hint">
+            Page 2 — start scribbling…
+            <small>Drag &amp; drop or paste an image anywhere</small>
+          </div>
+          <canvas class="board"></canvas>
+          <canvas class="overlay"></canvas>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="pager" id="pager">
+  <button id="prevPage" aria-label="Previous page">
+    <svg viewBox="0 0 24 24" style="width:18px;height:18px"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <span class="label" id="pageLabel">1 / 2</span>
+  <button id="nextPage" aria-label="Next page">
+    <svg viewBox="0 0 24 24" style="width:18px;height:18px"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const sizeEl     = document.getElementById('size');
+  const sizeLbl    = document.getElementById('sizeLabel');
+  const undoBtn    = document.getElementById('undo');
+  const redoBtn    = document.getElementById('redo');
+  const menu       = document.getElementById('menu');
+  const dropdown   = document.getElementById('dropdown');
+  const saveBtn    = document.getElementById('saveBtn');
+  const linesCb    = document.getElementById('withLines');
+  const fileIn     = document.getElementById('fileInput');
+  const exportNote = document.getElementById('exportNote');
+  const prevBtn    = document.getElementById('prevPage');
+  const nextBtn    = document.getElementById('nextPage');
+  const pageLabel  = document.getElementById('pageLabel');
+  const layoutBtn  = document.getElementById('layoutBtn');
+  const layoutLbl  = document.getElementById('layoutLabel');
+
+  const RULED       = 32;
+  const HANDLE_SIZE = 11;
+  const HANDLE_HIT  = 14;
+  const MIN_SIDE    = 30;
+
+  // Lowered from 720px → 560px so foldables (typically ~600–680 CSS px
+  // when unfolded) reliably trigger two-page spread.
+  const TWO_PAGE_MQ = '(min-width: 560px)';
+
+  const toolSizes   = { pen: 3, highlighter: 18, eraser: 24 };
+
+  const state = {
+    tool: 'pen',
+    color: '#2b1a0e',
+    size: 3,
+    strokes: [],        // every item has .page (0 or 1)
+    redo: [],
+    current: null,
+    selectedIndex: -1,
+    dragMode: null,
+    dragStart: null,
+    activePage: 0,
+    twoPage: false,
+    layoutMode: 'auto'  // 'auto' | 'one' | 'two'
+  };
+
+  /* ============================================================
+     Page objects
+     ============================================================ */
+  const pages = [];
+
+  document.querySelectorAll('.page-wrap').forEach((wrap, i) => {
+    const sheet   = wrap.querySelector('.sheet');
+    const board   = wrap.querySelector('canvas.board');
+    const overlay = wrap.querySelector('canvas.overlay');
+    const hint    = wrap.querySelector('.hint');
+
+    const pg = {
+      index: i,
+      wrap, sheet, board, overlay, hint,
+      ctx:  board.getContext('2d'),
+      octx: overlay.getContext('2d'),
+      dpr: 1
+    };
+    pages.push(pg);
+
+    new ResizeObserver(() => resizePage(pg)).observe(sheet);
+
+    board.addEventListener('pointerdown', (e) => onDown(e, pg));
+    board.addEventListener('pointermove', (e) => onMove(e, pg));
+    board.addEventListener('contextmenu', (e) => e.preventDefault());
+  });
+
+  window.addEventListener('pointerup', finishAny);
+  window.addEventListener('pointercancel', finishAny);
+
+  /* ============================================================
+     Sizing
+     ============================================================ */
+  function resizePage(pg) {
+    const r = pg.sheet.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width));
+    const h = Math.max(1, Math.round(r.height));
+    if (w <= 2 || h <= 2) return;
+
+    pg.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    pg.board.width   = Math.round(w * pg.dpr);
+    pg.board.height  = Math.round(h * pg.dpr);
+    pg.overlay.width = pg.board.width;
+    pg.overlay.height= pg.board.height;
+
+    redrawPage(pg);
+    drawOverlay(pg);
+  }
+
+  /* ============================================================
+     Rendering
+     ============================================================ */
+  function redrawPage(pg) {
+    const ctx = pg.ctx, dpr = pg.dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = pg.board.width / dpr;
+    const h = pg.board.height / dpr;
+    ctx.clearRect(-2, -2, w + 4, h + 4);
+
+    for (const s of state.strokes) {
+      if (s.page !== pg.index) continue;
+      if (s.kind === 'image') {
+        try { ctx.drawImage(s.img, s.x, s.y, s.w, s.h); } catch (_) {}
+      } else {
+        drawStroke(ctx, s);
+      }
+    }
+    if (state.current && state.current.page === pg.index) {
+      drawStroke(ctx, state.current);
+    }
+  }
+
+  function redrawAll() { pages.forEach(redrawPage); }
+
+  function applyStyle(ctx, s) {
+    ctx.globalCompositeOperation = s.tool === 'eraser' ? 'destination-out' : 'source-over';
+    ctx.globalAlpha = s.tool === 'highlighter' ? 0.32 : 1;
+    ctx.strokeStyle = s.color;
+    ctx.fillStyle   = s.color;
+    ctx.lineWidth   = s.size;
+    ctx.lineCap     = 'round';
+    ctx.lineJoin    = 'round';
+  }
+
+  function drawStroke(ctx, s) {
+    const p = s.points;
+    if (!p.length) return;
+
+    ctx.save();
+    applyStyle(ctx, s);
+
+    if (p.length === 1) {
+      ctx.beginPath();
+      ctx.arc(p[0].x, p[0].y, Math.max(s.size / 2, 0.5), 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      let prev = p[0], prevMid = p[0];
+      for (let i = 1; i < p.length; i++) {
+        const cur = p[i];
+        const mx = (prev.x + cur.x) / 2;
+        const my = (prev.y + cur.y) / 2;
+        ctx.beginPath();
+        ctx.moveTo(prevMid.x, prevMid.y);
+        ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
+        ctx.stroke();
+        prev = cur;
+        prevMid = { x: mx, y: my };
+      }
+      ctx.beginPath();
+      ctx.moveTo(prevMid.x, prevMid.y);
+      ctx.lineTo(prev.x, prev.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawLiveTail(ctx, s) {
+    const p = s.points;
+    const i = p.length - 1;
+    const prev = p[i - 1], cur = p[i];
+    const prevMid = i >= 2
+      ? { x: (p[i - 2].x + p[i - 1].x) / 2, y: (p[i - 2].y + p[i - 1].y) / 2 }
+      : p[0];
+    const mx = (prev.x + cur.x) / 2;
+    const my = (prev.y + cur.y) / 2;
+
+    ctx.save();
+    applyStyle(ctx, s);
+    ctx.beginPath();
+    ctx.moveTo(prevMid.x, prevMid.y);
+    ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ============================================================
+     Selection overlay
+     ============================================================ */
+  function getHandles(s) {
+    return {
+      nw: { x: s.x,        y: s.y },
+      ne: { x: s.x + s.w,  y: s.y },
+      sw: { x: s.x,        y: s.y + s.h },
+      se: { x: s.x + s.w,  y: s.y + s.h }
+    };
+  }
+
+  function drawOverlay(pg) {
+    const octx = pg.octx, dpr = pg.dpr;
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = pg.board.width / dpr;
+    const h = pg.board.height / dpr;
+    octx.clearRect(-2, -2, w + 4, h + 4);
+
+    const s = state.selectedIndex >= 0 ? state.strokes[state.selectedIndex] : null;
+    if (!s || s.kind !== 'image' || s.page !== pg.index) return;
+
+    octx.strokeStyle = '#2563eb';
+    octx.lineWidth = 1.5;
+    octx.setLineDash([6, 4]);
+    octx.strokeRect(s.x + 0.5, s.y + 0.5, Math.max(0, s.w - 1), Math.max(0, s.h - 1));
+    octx.setLineDash([]);
+
+    const hs = HANDLE_SIZE;
+    for (const p of Object.values(getHandles(s))) {
+      octx.fillStyle = '#ffffff';
+      octx.strokeStyle = '#2563eb';
+      octx.lineWidth = 2;
+      octx.beginPath();
+      octx.rect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+      octx.fill();
+      octx.stroke();
+    }
+  }
+
+  function drawAllOverlays() { pages.forEach(drawOverlay); }
+
+  /* ============================================================
+     Hit testing
+     ============================================================ */
+  function pointFrom(e, pg) {
+    const r = pg.board.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function hitTestHandles(p, pg) {
+    if (state.selectedIndex < 0) return null;
+    const s = state.strokes[state.selectedIndex];
+    if (!s || s.kind !== 'image' || s.page !== pg.index) return null;
+
+    for (const [name, hp] of Object.entries(getHandles(s))) {
+      if (Math.hypot(p.x - hp.x, p.y - hp.y) <= HANDLE_HIT) {
+        return { handle: name, element: s };
+      }
+    }
+    return null;
+  }
+
+  function hitTestImages(p, pageIndex) {
+    for (let i = state.strokes.length - 1; i >= 0; i--) {
+      const s = state.strokes[i];
+      if (s.kind !== 'image' || s.page !== pageIndex) continue;
+      if (p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h) {
+        return { element: s, index: i };
+      }
+    }
+    return null;
+  }
+
+  /* ============================================================
+     Cursor feedback
+     ============================================================ */
+  function updateCursor(p, pg) {
+    const sel = state.selectedIndex >= 0 ? state.strokes[state.selectedIndex] : null;
+    if (sel && sel.kind === 'image' && sel.page === pg.index) {
+      for (const [name, hp] of Object.entries(getHandles(sel))) {
+        if (Math.hypot(p.x - hp.x, p.y - hp.y) <= HANDLE_HIT) {
+          pg.board.style.cursor =
+            (name === 'nw' || name === 'se') ? 'nwse-resize' : 'nesw-resize';
+          return;
+        }
+      }
+    }
+    pg.board.style.cursor = hitTestImages(p, pg.index) ? 'move'
+                          : (state.tool === 'eraser' ? 'cell' : 'crosshair');
+  }
+
+  /* ============================================================
+     Pointer handlers
+     ============================================================ */
+  function onDown(e, pg) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+
+    try { pg.board.setPointerCapture(e.pointerId); } catch (_) {}
+
+    const p = pointFrom(e, pg);
+
+    const handleHit = hitTestHandles(p, pg);
+    if (handleHit) { startResize(handleHit.handle, handleHit.element, p); return; }
+
+    const imgHit = hitTestImages(p, pg.index);
+    if (imgHit) {
+      if (state.selectedIndex !== imgHit.index) {
+        state.selectedIndex = imgHit.index;
+        drawAllOverlays();
+      }
+      startMove(imgHit.element, p);
+      return;
+    }
+
+    if (state.selectedIndex >= 0) {
+      state.selectedIndex = -1;
+      drawAllOverlays();
+    }
+
+    state.redo.length = 0;
+    updateHistoryButtons();
+
+    state.current = {
+      kind: 'stroke',
+      page: pg.index,
+      tool: state.tool,
+      color: state.color,
+      size: state.size,
+      points: [p]
+    };
+    drawStroke(pg.ctx, state.current);
+    pg.hint.classList.add('hide');
+  }
+
+  function onMove(e, pg) {
+    const p = pointFrom(e, pg);
+
+    if (!state.current && !state.dragMode) {
+      if (e.pointerType === 'mouse') updateCursor(p, pg);
+      return;
+    }
+
+    if (state.current && state.current.page !== pg.index) return;
+    if (state.dragMode && state.selectedIndex >= 0) {
+      const sel = state.strokes[state.selectedIndex];
+      if (sel && sel.page !== pg.index) return;
+    }
+
+    e.preventDefault();
+
+    if (state.dragMode) { handleDrag(p); return; }
+
+    const s = state.current;
+    if (!s) return;
+
+    const raw = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : [];
+    const events = raw.length ? raw : [e];
+
+    for (const ev of events) {
+      const pt = pointFrom(ev, pg);
+      const last = s.points[s.points.length - 1];
+      const dx = pt.x - last.x, dy = pt.y - last.y;
+      if (dx * dx + dy * dy < 1) continue;
+      s.points.push(pt);
+      drawLiveTail(pg.ctx, s);
+    }
+  }
+
+  function finishAny() {
+    if (state.dragMode) {
+      state.dragMode = null;
+      state.dragStart = null;
+      return;
+    }
+    if (!state.current) return;
+
+    const pg = pages[state.current.page];
+    state.strokes.push(state.current);
+    state.current = null;
+
+    redrawPage(pg);
+    drawAllOverlays();
+    updateHistoryButtons();
+    updateHints();
+  }
+
+  /* ============================================================
+     Move + resize
+     ============================================================ */
+  function startMove(s, p) {
+    state.dragMode = 'move';
+    state.dragStart = { x: s.x, y: s.y, px: p.x, py: p.y };
+  }
+
+  function startResize(handle, s, p) {
+    let ax, ay;
+    if (handle === 'se')      { ax = s.x;       ay = s.y; }
+    else if (handle === 'sw') { ax = s.x + s.w; ay = s.y; }
+    else if (handle === 'ne') { ax = s.x;       ay = s.y + s.h; }
+    else                      { ax = s.x + s.w; ay = s.y + s.h; }
+
+    state.dragMode = 'resize-' + handle;
+    state.dragStart = { w: s.w, h: s.h, anchorX: ax, anchorY: ay, aspect: s.aspect };
+  }
+
+  function handleDrag(p) {
+    const s = state.strokes[state.selectedIndex];
+    if (!s || s.kind !== 'image') return;
+
+    if (state.dragMode === 'move') {
+      s.x = state.dragStart.x + (p.x - state.dragStart.px);
+      s.y = state.dragStart.y + (p.y - state.dragStart.py);
+    } else {
+      applyResize(s, state.dragMode.slice(7), p);
+    }
+    const pg = pages[s.page];
+    redrawPage(pg);
+    drawOverlay(pg);
+  }
+
+  function applyResize(s, handle, p) {
+    const ds = state.dragStart;
+    const sx = (handle === 'ne' || handle === 'se') ? 1 : -1;
+    const sy = (handle === 'sw' || handle === 'se') ? 1 : -1;
+
+    const dx = sx * ds.aspect, dy = sy;
+    const len = Math.hypot(dx, dy);
+    const dirX = dx / len, dirY = dy / len;
+
+    const proj = (p.x - ds.anchorX) * dirX + (p.y - ds.anchorY) * dirY;
+    const origDiag = Math.hypot(ds.w, ds.h);
+
+    let scale = proj / origDiag;
+    const minScale = Math.max(MIN_SIDE / ds.w, MIN_SIDE / ds.h);
+    if (!isFinite(scale) || scale < minScale) scale = minScale;
+
+    const newW = ds.w * scale, newH = ds.h * scale;
+
+    if (handle === 'se')      { s.x = ds.anchorX;        s.y = ds.anchorY; }
+    else if (handle === 'sw') { s.x = ds.anchorX - newW; s.y = ds.anchorY; }
+    else if (handle === 'ne') { s.x = ds.anchorX;        s.y = ds.anchorY - newH; }
+    else                      { s.x = ds.anchorX - newW; s.y = ds.anchorY - newH; }
+
+    s.w = newW; s.h = newH;
+  }
+
+  /* ============================================================
+     History + hints
+     ============================================================ */
+  function updateHistoryButtons() {
+    undoBtn.disabled = state.strokes.length === 0;
+    redoBtn.disabled = state.redo.length === 0;
+  }
+
+  function updateHints() {
+    for (const pg of pages) {
+      const has = state.strokes.some(s => s.page === pg.index);
+      pg.hint.classList.toggle('hide', has);
+    }
+  }
+
+  function undo() {
+    if (!state.strokes.length) return;
+    state.redo.push(state.strokes.pop());
+    state.selectedIndex = -1;
+    redrawAll(); drawAllOverlays();
+    updateHistoryButtons(); updateHints();
+  }
+
+  function redo() {
+    if (!state.redo.length) return;
+    state.strokes.push(state.redo.pop());
+    state.selectedIndex = -1;
+    redrawAll(); drawAllOverlays();
+    updateHistoryButtons(); updateHints();
+  }
+
+  undoBtn.addEventListener('click', undo);
+  redoBtn.addEventListener('click', redo);
+
+  document.getElementById('clear').addEventListener('click', () => {
+    const cur = state.twoPage ? -1 : state.activePage;
+    const label = cur === -1 ? 'BOTH pages' : `page ${cur + 1}`;
+    if (!state.strokes.some(s => cur === -1 || s.page === cur)) return;
+    if (!confirm(`Clear ${label}? This cannot be undone.`)) return;
+
+    if (cur === -1) state.strokes = [];
+    else state.strokes = state.strokes.filter(s => s.page !== cur);
+
+    state.redo = [];
+    state.current = null;
+    state.selectedIndex = -1;
+    redrawAll(); drawAllOverlays();
+    updateHistoryButtons(); updateHints();
+  });
+
+  /* ============================================================
+     Tool / color / size UI
+     ============================================================ */
+  function setTool(t) {
+    if (t === state.tool) return;
+    toolSizes[state.tool] = state.size;
+    state.tool = t;
+    state.size = toolSizes[t];
+    sizeEl.value = state.size;
+    sizeLbl.textContent = state.size;
+
+    document.querySelectorAll('.tool').forEach(b =>
+      b.classList.toggle('active', b.dataset.tool === t));
+    pages.forEach(pg => {
+      pg.board.style.cursor = t === 'eraser' ? 'cell' : 'crosshair';
+    });
+  }
+
+  document.querySelectorAll('.tool').forEach(btn => {
+    btn.addEventListener('click', () => setTool(btn.dataset.tool));
+  });
+
+  sizeEl.addEventListener('input', () => {
+    state.size = +sizeEl.value;
+    toolSizes[state.tool] = state.size;
+    sizeLbl.textContent = state.size;
+  });
+
+  function setColor(c) {
+    state.color = c;
+    document.querySelectorAll('.swatch[data-color]').forEach(s =>
+      s.classList.toggle('active', s.dataset.color.toLowerCase() === c.toLowerCase()));
+    if (state.tool === 'eraser') setTool('pen');
+  }
+
+  document.querySelectorAll('.swatch[data-color]').forEach(sw => {
+    sw.addEventListener('click', () => setColor(sw.dataset.color));
+  });
+
+  document.getElementById('customColor').addEventListener('input', (e) => {
+    state.color = e.target.value;
+    document.querySelectorAll('.swatch[data-color]').forEach(s => s.classList.remove('active'));
+    document.querySelector('.swatch.custom').classList.add('active');
+    if (state.tool === 'eraser') setTool('pen');
+  });
+
+  /* ============================================================
+     Image insertion
+     ============================================================ */
+  document.getElementById('insertImg').addEventListener('click', () => fileIn.click());
+
+  fileIn.addEventListener('change', () => {
+    const f = fileIn.files && fileIn.files[0];
+    if (f) loadImageFile(f);
+    fileIn.value = '';
+  });
+
+  function loadImageFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => insertImage(img);
+      img.onerror = () => alert('Could not load that image.');
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function insertImage(img) {
+    const pg = pages[state.activePage];
+    const sheetW = pg.board.width / pg.dpr;
+    const sheetH = pg.board.height / pg.dpr;
+
+    let w = img.naturalWidth || img.width || 300;
+    let h = img.naturalHeight || img.height || 300;
+
+    const maxW = sheetW * 0.6, maxH = sheetH * 0.6;
+    const scale = Math.min(1, maxW / w, maxH / h);
+    w *= scale; h *= scale;
+
+    const element = {
+      kind: 'image',
+      page: pg.index,
+      img,
+      x: (sheetW - w) / 2,
+      y: (sheetH - h) / 2,
+      w, h,
+      aspect: (img.naturalWidth || w) / (img.naturalHeight || h)
+    };
+
+    state.strokes.push(element);
+    state.redo.length = 0;
+    state.selectedIndex = state.strokes.length - 1;
+
+    redrawPage(pg); drawAllOverlays();
+    updateHistoryButtons(); updateHints();
+  }
+
+  ['dragenter', 'dragover'].forEach(evt => {
+    document.addEventListener(evt, (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+  });
+
+  document.addEventListener('drop', (e) => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f && f.type.startsWith('image/')) {
+      e.preventDefault();
+      loadImageFile(f);
+    }
+  });
+
+  document.addEventListener('paste', (e) => {
+    if (!e.clipboardData) return;
+    const item = Array.from(e.clipboardData.items || [])
+      .find(it => it.type && it.type.startsWith('image/'));
+    if (item) {
+      e.preventDefault();
+      const f = item.getAsFile();
+      if (f) loadImageFile(f);
+    }
+  });
+
+  /* ============================================================
+     Save menu
+     ============================================================ */
+  saveBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = dropdown.classList.toggle('open');
+    saveBtn.setAttribute('aria-expanded', String(open));
+  });
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!menu.contains(e.target)) {
+      dropdown.classList.remove('open');
+      saveBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  document.querySelectorAll('[data-export]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      dropdown.classList.remove('open');
+      saveBtn.setAttribute('aria-expanded', 'false');
+      exportFile(btn.dataset.export);
+    });
+  });
+
+  /* ============================================================
+     Export
+     ============================================================ */
+  function addNoise(c, W, H) {
+    const TS = 140;
+    const tile = document.createElement('canvas');
+    tile.width = tile.height = TS;
+    const tc = tile.getContext('2d');
+    const img = tc.createImageData(TS, TS);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const v = 118 + Math.random() * 40;
+      d[i] = v + 8; d[i + 1] = v; d[i + 2] = v - 12; d[i + 3] = 26;
+    }
+    tc.putImageData(img, 0, 0);
+    const pat = c.createPattern(tile, 'repeat');
+    c.save();
+    c.fillStyle = pat;
+    c.fillRect(0, 0, W, H);
+    c.restore();
+  }
+
+  function paintParchment(c, W, H, scale, withLines, hCss) {
+    const base = c.createLinearGradient(0, 0, 0, H);
+    base.addColorStop(0,    '#f8ebcd');
+    base.addColorStop(0.55, '#f3dfb4');
+    base.addColorStop(1,    '#ecd39c');
+    c.fillStyle = base;
+    c.fillRect(0, 0, W, H);
+
+    const R = Math.max(W, H);
+    const blotch = (rx, ry, rad, rgb, a) => {
+      const x = W * rx, y = H * ry, r = R * rad;
+      const g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(${rgb},${a})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      c.fillStyle = g;
+      c.fillRect(x - r, y - r, r * 2, r * 2);
+    };
+    blotch(0.18, 0.28, 0.42, '180,140,80', 0.16);
+    blotch(0.76, 0.66, 0.46, '160,120,60', 0.13);
+    blotch(0.46, 0.88, 0.42, '200,170,110', 0.14);
+    blotch(0.88, 0.12, 0.38, '200,170,110', 0.12);
+
+    const vg = c.createRadialGradient(
+      W / 2, H / 2, Math.min(W, H) * 0.35,
+      W / 2, H / 2, Math.max(W, H) * 0.75
+    );
+    vg.addColorStop(0, 'rgba(120,80,30,0)');
+    vg.addColorStop(1, 'rgba(120,80,30,0.14)');
+    c.fillStyle = vg;
+    c.fillRect(0, 0, W, H);
+
+    addNoise(c, W, H);
+
+    if (withLines) {
+      c.fillStyle = 'rgba(150,110,55,0.30)';
+      const t = Math.max(1, Math.round(scale));
+      for (let y = 0; y < hCss; y += RULED) {
+        c.fillRect(0, Math.round(y * scale), W, t);
+      }
+    }
+  }
+
+  function compose(pageList, withLines, scale) {
+    const pg0  = pages[pageList[0]];
+    const wCss = pg0.board.width / pg0.dpr;
+    const hCss = pg0.board.height / pg0.dpr;
+
+    const gapCss = pageList.length > 1 ? 20 : 0;
+    const outWCss = pageList.length * wCss + gapCss * (pageList.length - 1);
+
+    const out = document.createElement('canvas');
+    out.width  = Math.round(outWCss * scale);
+    out.height = Math.round(hCss * scale);
+    const c = out.getContext('2d');
+
+    c.fillStyle = '#0a0f1a';
+    c.fillRect(0, 0, out.width, out.height);
+
+    pageList.forEach((pi, k) => {
+      const pg = pages[pi];
+      const W = wCss * scale, H = hCss * scale;
+      const offX = (wCss + gapCss) * k;
+
+      c.save();
+      c.translate(offX * scale, 0);
+
+      paintParchment(c, W, H, scale, withLines, hCss);
+
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = 'high';
+      c.drawImage(pg.board, 0, 0, W, H);
+
+      c.restore();
+    });
+
+    return out;
+  }
+
+  function timestamp() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  }
+
+  function download(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  function exportFile(type) {
+    state.selectedIndex = -1;
+    drawAllOverlays();
+
+    const pageList = state.twoPage ? [0, 1] : [state.activePage];
+    const withLines = linesCb.checked;
+    const out  = compose(pageList, withLines, 2);
+    const base = 'note-' + timestamp();
+
+    if (type === 'png') {
+      out.toBlob((blob) => { if (blob) download(blob, base + '.png'); }, 'image/png');
+      return;
+    }
+
+    const dataUrl = out.toDataURL('image/jpeg', 0.92);
+    const bytes = base64ToBytes(dataUrl.split(',')[1]);
+    download(buildPDF(bytes, out.width, out.height), base + '.pdf');
+  }
+
+  function base64ToBytes(b64) {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+
+  function buildPDF(jpegBytes, imgW, imgH) {
+    const enc = new TextEncoder();
+    const parts = [];
+    let size = 0;
+    const offsets = [0, 0, 0, 0, 0, 0];
+
+    const add = (d) => {
+      const b = (d instanceof Uint8Array) ? d : enc.encode(d);
+      parts.push(b); size += b.length;
+    };
+
+    add(new Uint8Array([0x25,0x50,0x44,0x46,0x2D,0x31,0x2E,0x34,0x0A,0x25,0xE2,0xE3,0xCF,0xD3,0x0A]));
+
+    let pageW, pageH;
+    if (imgW >= imgH) { pageW = 841.89; pageH = pageW * imgH / imgW; }
+    else              { pageW = 595.28; pageH = pageW * imgH / imgW; }
+    pageW = +pageW.toFixed(2);
+    pageH = +pageH.toFixed(2);
+
+    const content = `q\n${pageW} 0 0 ${pageH} 0 0 cm\n/Im0 Do\nQ\n`;
+    const contentBytes = enc.encode(content);
+
+    offsets[1] = size;
+    add('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+    offsets[2] = size;
+    add('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+    offsets[3] = size;
+    add(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] `
+      + `/Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n`);
+    offsets[4] = size;
+    add(`4 0 obj\n<< /Length ${contentBytes.length} >>\nstream\n`);
+    add(contentBytes);
+    add('\nendstream\nendobj\n');
+    offsets[5] = size;
+    add(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imgW} /Height ${imgH} `
+      + `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`);
+    add(jpegBytes);
+    add('\nendstream\nendobj\n');
+
+    const xrefPos = size;
+    let xref = 'xref\n0 6\n0000000000 65535 f \n';
+    for (let i = 1; i <= 5; i++) xref += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+    add(xref);
+    add(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`);
+
+    return new Blob(parts, { type: 'application/pdf' });
+  }
+
+  /* ============================================================
+     Fold / unfold layout  —  with manual override
+     ============================================================ */
+  const mq = window.matchMedia(TWO_PAGE_MQ);
+
+  function applyLayout() {
+    let twoPage;
+    if (state.layoutMode === 'two') twoPage = true;
+    else if (state.layoutMode === 'one') twoPage = false;
+    else twoPage = mq.matches;                 // 'auto'
+
+    state.twoPage = twoPage;
+    document.body.classList.toggle('two-page', twoPage);
+
+    pages.forEach(pg => pg.wrap.classList.toggle('active', pg.index === state.activePage));
+
+    exportNote.textContent = twoPage
+      ? 'Exports the two-page spread.'
+      : `Exports page ${state.activePage + 1}.`;
+
+    updatePager();
+    updateLayoutBtn();
+
+    // Force re-measure of the pages that just became visible
+    requestAnimationFrame(() => pages.forEach(resizePage));
+  }
+
+  function updateLayoutBtn() {
+    layoutBtn.dataset.mode = state.layoutMode;
+    layoutLbl.textContent =
+      state.layoutMode === 'one' ? '1 page' :
+      state.layoutMode === 'two' ? '2 pages' :
+      'Auto';
+    layoutBtn.title =
+      state.layoutMode === 'auto'
+        ? 'Layout: Auto — tap to cycle (Auto → 1 page → 2 pages)'
+        : `Layout: forced ${state.layoutMode === 'one' ? 'one page' : 'two pages'} — tap to cycle`;
+  }
+
+  layoutBtn.addEventListener('click', () => {
+    const modes = ['auto', 'one', 'two'];
+    const i = modes.indexOf(state.layoutMode);
+    state.layoutMode = modes[(i + 1) % 3];
+    applyLayout();
+  });
+
+  if (mq.addEventListener) mq.addEventListener('change', () => {
+    if (state.layoutMode === 'auto') applyLayout();
+  });
+  else mq.addListener(() => {
+    if (state.layoutMode === 'auto') applyLayout();
+  });
+
+  /* Belt & braces: listen to visualViewport too — some foldables
+     fire this more reliably than window resize during the fold. */
+  if (window.visualViewport) {
+    let vvTimer = null;
+    window.visualViewport.addEventListener('resize', () => {
+      clearTimeout(vvTimer);
+      vvTimer = setTimeout(() => {
+        if (state.layoutMode === 'auto') applyLayout();
+        else pages.forEach(resizePage);
+      }, 120);
+    });
+  }
+
+  function updatePager() {
+    pageLabel.textContent = (state.activePage + 1) + ' / ' + pages.length;
+    prevBtn.disabled = state.activePage === 0;
+    nextBtn.disabled = state.activePage === pages.length - 1;
+  }
+
+  function goToPage(i) {
+    state.activePage = Math.max(0, Math.min(pages.length - 1, i));
+    if (!state.twoPage) {
+      pages.forEach(pg => pg.wrap.classList.toggle('active', pg.index === state.activePage));
+    }
+    state.selectedIndex = -1;
+    drawAllOverlays();
+    updatePager();
+    exportNote.textContent = state.twoPage
+      ? 'Exports the two-page spread.'
+      : `Exports page ${state.activePage + 1}.`;
+  }
+
+  prevBtn.addEventListener('click', () => goToPage(state.activePage - 1));
+  nextBtn.addEventListener('click', () => goToPage(state.activePage + 1));
+
+  /* ============================================================
+     Keyboard shortcuts
+     ============================================================ */
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' && e.target.type === 'color') return;
+
+    const mod = e.ctrlKey || e.metaKey;
+    const k = e.key.toLowerCase();
+
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedIndex >= 0) {
+      e.preventDefault();
+      state.strokes.splice(state.selectedIndex, 1);
+      state.selectedIndex = -1;
+      redrawAll(); drawAllOverlays();
+      updateHistoryButtons(); updateHints();
+      return;
+    }
+
+    if (e.key === 'Escape' && state.selectedIndex >= 0) {
+      state.selectedIndex = -1;
+      drawAllOverlays();
+      return;
+    }
+
+    if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (mod && k === 'y') { e.preventDefault(); redo(); }
+    else if (mod && k === 's') { e.preventDefault(); exportFile('png'); }
+    else if (!mod && !e.altKey) {
+      if (k === 'p') setTool('pen');
+      else if (k === 'h') setTool('highlighter');
+      else if (k === 'e') setTool('eraser');
+      else if (k === 'i') { e.preventDefault(); fileIn.click(); }
+      else if (k === 'l') { e.preventDefault(); layoutBtn.click(); }
+      else if (k === 'arrowleft')  goToPage(state.activePage - 1);
+      else if (k === 'arrowright') goToPage(state.activePage + 1);
+    }
+  });
+
+  /* ============================================================
+     Boot
+     ============================================================ */
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => {
+      if (state.layoutMode === 'auto') applyLayout();
+      else pages.forEach(resizePage);
+    }, 250);
+  });
+
+  applyLayout();
+  updateHistoryButtons();
+  updateHints();
+
+  requestAnimationFrame(() => pages.forEach(resizePage));
+})();
+</script>
+</body>
+</html>
