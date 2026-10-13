@@ -116,7 +116,7 @@
   .dropdown{
     position:absolute;right:0;top:calc(100% + 8px);
     background:#111827;border:1px solid rgba(255,255,255,.1);
-    border-radius:12px;padding:6px;min-width:255px;
+    border-radius:12px;padding:6px;min-width:265px;
     box-shadow:0 20px 40px rgba(0,0,0,.55);
     display:none;flex-direction:column;gap:2px;z-index:50;
   }
@@ -232,33 +232,35 @@
   .board{touch-action:none;cursor:crosshair;z-index:1}
   .overlay{pointer-events:none;z-index:2}
 
-  /* Text layer (invisible contenteditable overlay used only when the text tool is active) */
+  /* Text layer sits ABOVE the canvas when the text tool is active */
   .text-layer{
     position:absolute;inset:0;
-    z-index:3;
-    display:none;
+    z-index:5;
+    pointer-events:none;
   }
-  body.text-mode .text-layer{display:block}
+  body.text-mode .text-layer{pointer-events:none}
   body.text-mode .board,
   body.text-mode .overlay{cursor:text}
 
   .text-item{
     position:absolute;
-    min-width:20px;
+    min-width:24px;
     padding:2px 4px;
     border:1px dashed transparent;
     border-radius:4px;
     outline:none;
-    white-space:pre;
-    line-height:1;
+    white-space:pre-wrap;
+    word-break:break-word;
+    line-height:1.05;
     caret-color:#2563eb;
     cursor:text;
     user-select:text;
     -webkit-user-select:text;
+    pointer-events:auto;
+    /* Prevent the browser from zooming the page on focus on iOS */
+    font-size:16px;
   }
-  .text-item:hover{
-    border-color:rgba(37,99,235,.35);
-  }
+  .text-item:hover{ border-color:rgba(37,99,235,.35); }
   .text-item:focus{
     border-color:#2563eb;
     background:rgba(37,99,235,.06);
@@ -351,6 +353,25 @@
   }
   @keyframes spin{ to { transform:rotate(360deg); } }
 
+  /* Toast for status messages */
+  .toast{
+    position:fixed;
+    bottom:76px;left:50%;transform:translateX(-50%) translateY(20px);
+    padding:10px 16px;border-radius:10px;
+    background:rgba(17,24,39,.96);
+    color:#e6edf7;font-size:13px;
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 20px 50px rgba(0,0,0,.6);
+    opacity:0;pointer-events:none;
+    transition:opacity .2s, transform .2s;
+    z-index:70;
+    max-width:80vw;text-align:center;
+  }
+  .toast.show{
+    opacity:1;
+    transform:translateX(-50%) translateY(0);
+  }
+
   @media (max-width:640px){
     .toolbar{gap:6px;padding:8px 10px}
     .tool,.icon{width:34px;height:34px}
@@ -379,7 +400,7 @@
     <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser">
       <svg viewBox="0 0 24 24"><path d="M20 20H8.5L3.7 15.2a2 2 0 0 1 0-2.8l9-9a2 2 0 0 1 2.8 0l5.5 5.5a2 2 0 0 1 0 2.8L11.5 20"/><path d="M7 12l5 5"/></svg>
     </button>
-    <button class="tool" data-tool="text" title="Text (T) — tap on the page, then type" aria-label="Text">
+    <button class="tool" data-tool="text" title="Text (T) — tap page then type" aria-label="Text">
       <svg viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
     </button>
   </div>
@@ -464,6 +485,10 @@
         <input type="checkbox" id="withNumbers" checked>
         Include page numbers
       </label>
+      <label class="check" style="border-top:0;margin-top:0;padding-top:0">
+        <input type="checkbox" id="askLocation">
+        Ask where to save (if supported)
+      </label>
       <div class="note" id="exportNote">Exports the current view.</div>
     </div>
   </div>
@@ -499,6 +524,8 @@
   </div>
 </div>
 
+<div class="toast" id="toast"></div>
+
 <script>
 (() => {
   'use strict';
@@ -514,6 +541,7 @@
   const saveBtn    = document.getElementById('saveBtn');
   const linesCb    = document.getElementById('withLines');
   const numbersCb  = document.getElementById('withNumbers');
+  const askCb      = document.getElementById('askLocation');
   const fileIn     = document.getElementById('fileInput');
   const exportNote = document.getElementById('exportNote');
   const prevBtn    = document.getElementById('prevPage');
@@ -526,6 +554,7 @@
   const savingBadge= document.getElementById('savingBadge');
   const busy       = document.getElementById('busy');
   const busyText   = document.getElementById('busyText');
+  const toastEl    = document.getElementById('toast');
 
   const RULED       = 32;
   const HANDLE_SIZE = 11;
@@ -537,12 +566,14 @@
 
   const toolSizes = { pen: 3, highlighter: 18, eraser: 24, text: 3 };
 
+  const supportsSavePicker = typeof window.showSaveFilePicker === 'function';
+
   const state = {
     tool: 'pen',
     color: '#2b1a0e',
     size: 3,
-    strokes: [],       // freehand + images
-    texts: [],         // {kind:'text', page, x, y, text, color, size, id}
+    strokes: [],
+    texts: [],
     redo: [],
     current: null,
     selectedIndex: -1,
@@ -553,11 +584,22 @@
     visiblePages: [0],
     twoPage: false,
     layoutMode: 'auto',
-    pageCount: 2,
     loaded: false
   };
 
   const pages = [];
+
+  /* ============================================================
+     Toast
+     ============================================================ */
+  let toastTimer = null;
+  function showToast(msg, ms = 2400) {
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms);
+  }
 
   /* ============================================================
      IndexedDB persistence
@@ -897,65 +939,81 @@
   }
 
   /* ============================================================
-     Text layer — DOM elements over the canvas
+     Text layer
      ============================================================ */
   function textFontSize(t) {
-    return Math.max(10, t.size * 5);   // text uses the size slider as a scale
+    return Math.max(12, t.size * 5);
   }
 
   function buildTextElement(t) {
-    const el = document.createElement('div');
+    // Use a textarea so mobile keyboards reliably appear and allow multiline
+    const el = document.createElement('textarea');
     el.className = 'text-item';
-    el.contentEditable = 'true';
     el.spellcheck = false;
+    el.rows = 1;
+    el.value = t.text;
     el.dataset.textId = String(t.id);
-    el.textContent = t.text;
 
     el.style.left = t.x + 'px';
-    el.style.top = t.y + 'px';
+    el.style.top  = t.y + 'px';
     el.style.color = t.color;
     el.style.fontSize = textFontSize(t) + 'px';
     el.style.fontFamily = t.font;
+    el.style.background = 'transparent';
+    el.style.border = '1px dashed transparent';
+    el.style.resize = 'none';
+    el.style.overflow = 'hidden';
+    el.style.whiteSpace = 'pre-wrap';
+    el.style.outline = 'none';
 
-    el.addEventListener('focus', () => {
-      state.selectedTextId = t.id;
-    });
+    // Auto-size height to content
+    const autosize = () => {
+      el.style.height = 'auto';
+      el.style.height = (el.scrollHeight) + 'px';
+    };
+
+    // Initial width based on content + a comfortable typing area
+    const initialWidth = Math.max(120, Math.min(420, Math.round((t.text || ' ').length * textFontSize(t) * 0.6) + 40));
+    el.style.width = initialWidth + 'px';
+
+    el.addEventListener('focus', () => { state.selectedTextId = t.id; });
 
     el.addEventListener('blur', () => {
-      const newText = el.textContent.replace(/\n+$/, '');
+      const newText = el.value.replace(/\n+$/, '');
       if (!newText.trim()) {
-        // Remove empty text items
-        removeText(t.id, false);
+        removeText(t.id, true);
       } else {
         t.text = newText;
+        t.x = parseFloat(el.style.left) || t.x;
+        t.y = parseFloat(el.style.top)  || t.y;
         scheduleSave();
       }
     });
 
     el.addEventListener('input', () => {
-      // Live update so it's saved even if the user never blurs
-      t.text = el.textContent;
+      t.text = el.value;
+      autosize();
       scheduleSave();
     });
 
     el.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Escape') {
-        el.blur();
-        return;
-      }
-      // Enter inserts a newline by default; Shift+Enter too.
-      // Backspace at the very start with empty content deletes the item.
-      if (e.key === 'Backspace' && el.textContent === '') {
+      // Let keyboard shortcuts inside the box work naturally
+      if (e.key === 'Escape') { el.blur(); }
+      // Ctrl/Cmd+Enter commits
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        removeText(t.id, false);
+        el.blur();
       }
     });
 
-    // Prevent drawing when the user taps inside the text box
-    el.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-    });
+    // Prevent drawing when tapping inside the box
+    el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+
+    // Prevent the whole app from scrolling when the box is focused
+    el.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: true });
+
+    // Initial autosize once it's in the DOM
+    requestAnimationFrame(autosize);
 
     return el;
   }
@@ -963,7 +1021,6 @@
   function rebuildTextLayers() {
     for (const pg of pages) pg.textLayer.innerHTML = '';
 
-    // Ensure each text item has a stable id
     for (let i = 0; i < state.texts.length; i++) {
       if (state.texts[i].id == null) state.texts[i].id = i + 1;
     }
@@ -975,6 +1032,10 @@
     }
   }
 
+  /* ============================================================
+     Add text — triggered from a user gesture so the keyboard
+     appears reliably on mobile
+     ============================================================ */
   function addTextAt(pageIndex, x, y) {
     const id = (state.texts.reduce((m, t) => Math.max(m, t.id || 0), 0) || 0) + 1;
     const t = {
@@ -990,21 +1051,23 @@
     state.texts.push(t);
 
     const pg = pages[pageIndex];
-    if (pg) {
-      const el = buildTextElement(t);
-      pg.textLayer.appendChild(el);
-      el.focus();
+    if (!pg) return t;
 
-      // Place the caret inside
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(true);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
+    const el = buildTextElement(t);
+    pg.textLayer.appendChild(el);
+    pg.hint.classList.add('hide');
+
+    // Force focus IMMEDIATELY in the same user-gesture call stack.
+    // This is the fix that makes the mobile keyboard appear.
+    el.focus({ preventScroll: true });
+
+    // If focus didn't take (some browsers), try again next frame
+    if (document.activeElement !== el) {
+      requestAnimationFrame(() => {
+        try { el.focus({ preventScroll: true }); } catch (_) {}
+      });
     }
 
-    pg && pg.hint.classList.add('hide');
     scheduleSave();
     return t;
   }
@@ -1015,18 +1078,8 @@
     if (save) scheduleSave();
   }
 
-  function updateTextStyleForSelection() {
-    if (state.selectedTextId == null) return;
-    const t = state.texts.find(x => x.id === state.selectedTextId);
-    if (!t) return;
-    t.color = state.color;
-    t.size = state.size;
-    rebuildTextLayers();
-    scheduleSave();
-  }
-
   /* ============================================================
-     Selection overlay (images only — text uses its own DOM border)
+     Selection overlay (images)
      ============================================================ */
   function getHandles(s) {
     return {
@@ -1115,14 +1168,14 @@
 
     const p = pointFrom(e, pg);
 
-    // If the text tool is active, tapping the page creates a text item
+    // Text tool: create a new text box right where the user tapped
     if (state.tool === 'text') {
-      // Deselect any selected image
       if (state.selectedIndex >= 0) {
         state.selectedIndex = -1;
         drawAllOverlays();
       }
-      addTextAt(pg.index, p.x, p.y);
+      // Offsets so the box appears with its top-left near the tap point
+      addTextAt(pg.index, Math.max(0, p.x - 8), Math.max(0, p.y - 10));
       return;
     }
 
@@ -1196,10 +1249,7 @@
   }
 
   function updateCursor(p, pg) {
-    if (state.tool === 'text') {
-      pg.board.style.cursor = 'text';
-      return;
-    }
+    if (state.tool === 'text') { pg.board.style.cursor = 'text'; return; }
     const sel = state.selectedIndex >= 0 ? state.strokes[state.selectedIndex] : null;
     if (sel && sel.kind === 'image' && sel.page === pg.index) {
       for (const [name, hp] of Object.entries(getHandles(sel))) {
@@ -1313,7 +1363,6 @@
   }
 
   function undo() {
-    // Undo a text removal/change isn't tracked; only strokes
     if (!state.strokes.length) return;
     state.redo.push(state.strokes.pop());
     state.selectedIndex = -1;
@@ -1379,7 +1428,6 @@
         t === 'eraser' ? 'cell' : 'crosshair';
     });
 
-    // When leaving the text tool, blur any focused text item
     if (t !== 'text' && document.activeElement && document.activeElement.classList.contains('text-item')) {
       document.activeElement.blur();
     }
@@ -1394,7 +1442,6 @@
     toolSizes[state.tool] = state.size;
     sizeLbl.textContent = state.size;
 
-    // If a text item is selected, live-update its size
     if (state.selectedTextId != null) {
       const t = state.texts.find(x => x.id === state.selectedTextId);
       if (t) {
@@ -1412,7 +1459,6 @@
       s.classList.toggle('active', s.dataset.color.toLowerCase() === c.toLowerCase()));
     if (state.tool === 'eraser') setTool('pen');
 
-    // If a text item is selected, live-update its color
     if (state.selectedTextId != null) {
       const t = state.texts.find(x => x.id === state.selectedTextId);
       if (t) {
@@ -1513,7 +1559,6 @@
 
   document.addEventListener('paste', (e) => {
     if (!e.clipboardData) return;
-    // If we're editing a text item, let the browser handle text paste
     if (document.activeElement && document.activeElement.classList.contains('text-item')) return;
     const item = Array.from(e.clipboardData.items || [])
       .find(it => it.type && it.type.startsWith('image/'));
@@ -1538,7 +1583,8 @@
   stage.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse') return;
     if (state.current || state.dragMode) return;
-    if (state.tool === 'text') return;   // don't swipe while placing text
+    if (state.tool === 'text') return;
+    if (e.target && e.target.classList && e.target.classList.contains('text-item')) return;
     swipe.active = true;
     swipe.pointerId = e.pointerId;
     swipe.startX = e.clientX;
@@ -1589,15 +1635,9 @@
     if (!horizontal || !verticalOK || (!distanceOK && !velocityOK)) return;
 
     if (dx < 0) {
-      if (!nextBtn.disabled) {
-        animateTurn('next');
-        nextBtn.click();
-      }
+      if (!nextBtn.disabled) { animateTurn('next'); nextBtn.click(); }
     } else {
-      if (!prevBtn.disabled) {
-        animateTurn('prev');
-        prevBtn.click();
-      }
+      if (!prevBtn.disabled) { animateTurn('prev'); prevBtn.click(); }
     }
   }
 
@@ -1641,8 +1681,48 @@
   });
 
   /* ============================================================
-     Export
+     Export with optional save picker
      ============================================================ */
+  async function saveBlob(blob, filename, mimeHint) {
+    const usePicker = askCb.checked && supportsSavePicker;
+
+    if (usePicker) {
+      try {
+        const ext = filename.split('.').pop();
+        const types = [{
+          description: ext.toUpperCase() + ' file',
+          accept: { [mimeHint || blob.type || 'application/octet-stream']: ['.' + ext] }
+        }];
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        showToast('Saved to ' + handle.name);
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          // user cancelled — silently fall back to download
+          return;
+        }
+        console.warn('Save picker failed, falling back to download:', err);
+        // fall through to regular download
+      }
+    }
+
+    // Standard browser download
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast('Downloaded ' + filename);
+  }
+
   function addNoise(c, W, H) {
     const TS = 140;
     const tile = document.createElement('canvas');
@@ -1715,7 +1795,6 @@
     c.restore();
   }
 
-  // Draw all texts for a given page onto a canvas ctx (for export)
   function drawTextsForPage(c, pageIndex, scale) {
     for (const t of state.texts) {
       if (t.page !== pageIndex) continue;
@@ -1806,21 +1885,11 @@
     return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
   }
 
-  function download(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  }
-
   function getExportPages() {
     return state.twoPage ? state.visiblePages.slice() : [state.currentPage];
   }
 
-  function exportFile(type) {
+  async function exportFile(type) {
     state.selectedIndex = -1;
     drawAllOverlays();
 
@@ -1828,62 +1897,64 @@
     const withNumbers = numbersCb.checked;
     const base = 'note-' + timestamp();
 
-    /* ---------- Plain text export ---------- */
     if (type === 'txt') {
       let out = '';
       for (let i = 0; i < pages.length; i++) {
         const pageTexts = state.texts
           .filter(t => t.page === i)
           .sort((a, b) => (a.y - b.y) || (a.x - b.x));
-        const lines = pageTexts.map(t => t.text);
         out += `Page ${i + 1}\n`;
         out += '─'.repeat(40) + '\n';
-        out += (lines.length ? lines.join('\n') : '(empty)') + '\n\n';
+        out += (pageTexts.length ? pageTexts.map(t => t.text).join('\n') : '(empty)') + '\n\n';
       }
       const blob = new Blob([out], { type: 'text/plain;charset=utf-8' });
-      download(blob, base + '.txt');
+      await saveBlob(blob, base + '.txt', 'text/plain');
       return;
     }
 
-    /* ---------- PDF: all pages ---------- */
     if (type === 'pdf-all') {
       busyText.textContent = 'Building PDF…';
       busy.classList.add('show');
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          try {
-            const scale = 2;
-            const jpegPages = [];
-            for (let i = 0; i < pages.length; i++) {
-              const j = renderPageToJPEG(i, withLines, withNumbers, scale);
-              if (j) jpegPages.push(j);
-            }
-            const blob = buildMultiPagePDF(jpegPages);
-            download(blob, base + '-all.pdf');
-          } catch (err) {
-            console.error(err);
-            alert('Could not build the PDF: ' + err.message);
-          } finally {
-            busy.classList.remove('show');
-          }
-        }, 40);
-      });
+
+      // Yield so the overlay paints first
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 30)));
+
+      try {
+        const scale = 2;
+        const jpegPages = [];
+        for (let i = 0; i < pages.length; i++) {
+          const j = renderPageToJPEG(i, withLines, withNumbers, scale);
+          if (j) jpegPages.push(j);
+        }
+        const blob = buildMultiPagePDF(jpegPages);
+        await saveBlob(blob, base + '-all.pdf', 'application/pdf');
+      } catch (err) {
+        console.error(err);
+        alert('Could not build the PDF: ' + err.message);
+      } finally {
+        busy.classList.remove('show');
+      }
       return;
     }
 
-    /* ---------- Single view ---------- */
     const pageList = getExportPages().filter(i => pages[i]);
     if (!pageList.length) return;
     const out = compose(pageList, withLines, withNumbers, 2);
 
     if (type === 'png') {
-      out.toBlob((blob) => { if (blob) download(blob, base + '.png'); }, 'image/png');
+      await new Promise((resolve) => {
+        out.toBlob(async (blob) => {
+          if (blob) await saveBlob(blob, base + '.png', 'image/png');
+          resolve();
+        }, 'image/png');
+      });
       return;
     }
 
     const dataUrl = out.toDataURL('image/jpeg', 0.92);
     const bytes = base64ToBytes(dataUrl.split(',')[1]);
-    download(buildMultiPagePDF([{ bytes, w: out.width, h: out.height }]), base + '.pdf');
+    const blob = buildMultiPagePDF([{ bytes, w: out.width, h: out.height }]);
+    await saveBlob(blob, base + '.pdf', 'application/pdf');
   }
 
   function base64ToBytes(b64) {
@@ -2282,6 +2353,12 @@
     deferredPrompt = null;
     if (installBtn) installBtn.style.display = 'none';
   });
+
+  // Let the export note reflect save-picker availability
+  if (!supportsSavePicker) {
+    askCb.disabled = true;
+    askCb.parentElement.title = 'Not supported in this browser — files go to Downloads.';
+  }
 })();
 </script>
 </body>
