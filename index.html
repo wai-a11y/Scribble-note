@@ -155,31 +155,21 @@
     gap:18px;
     will-change:transform,opacity;
   }
-  /* Page turn animations */
-  .book.turn-next{
-    animation:turnNext .38s cubic-bezier(.4,0,.2,1);
-  }
-  .book.turn-prev{
-    animation:turnPrev .38s cubic-bezier(.4,0,.2,1);
-  }
+  .book.turn-next{ animation:turnNext .38s cubic-bezier(.4,0,.2,1); }
+  .book.turn-prev{ animation:turnPrev .38s cubic-bezier(.4,0,.2,1); }
   @keyframes turnNext{
-    0%   { transform:translateX(0);    opacity:1; }
-    45%  { transform:translateX(-40px); opacity:.35; }
-    55%  { transform:translateX(40px);  opacity:.35; }
-    100% { transform:translateX(0);    opacity:1; }
+    0%{transform:translateX(0);opacity:1}
+    45%{transform:translateX(-40px);opacity:.35}
+    55%{transform:translateX(40px);opacity:.35}
+    100%{transform:translateX(0);opacity:1}
   }
   @keyframes turnPrev{
-    0%   { transform:translateX(0);    opacity:1; }
-    45%  { transform:translateX(40px);  opacity:.35; }
-    55%  { transform:translateX(-40px); opacity:.35; }
-    100% { transform:translateX(0);    opacity:1; }
+    0%{transform:translateX(0);opacity:1}
+    45%{transform:translateX(40px);opacity:.35}
+    55%{transform:translateX(-40px);opacity:.35}
+    100%{transform:translateX(0);opacity:1}
   }
-
-  /* Drag feedback while swiping */
-  .book.dragging{
-    transition:none;
-    animation:none;
-  }
+  .book.dragging{transition:none;animation:none}
 
   .page-wrap{
     flex:1 1 0;
@@ -241,6 +231,38 @@
   }
   .board{touch-action:none;cursor:crosshair;z-index:1}
   .overlay{pointer-events:none;z-index:2}
+
+  /* Text layer (invisible contenteditable overlay used only when the text tool is active) */
+  .text-layer{
+    position:absolute;inset:0;
+    z-index:3;
+    display:none;
+  }
+  body.text-mode .text-layer{display:block}
+  body.text-mode .board,
+  body.text-mode .overlay{cursor:text}
+
+  .text-item{
+    position:absolute;
+    min-width:20px;
+    padding:2px 4px;
+    border:1px dashed transparent;
+    border-radius:4px;
+    outline:none;
+    white-space:pre;
+    line-height:1;
+    caret-color:#2563eb;
+    cursor:text;
+    user-select:text;
+    -webkit-user-select:text;
+  }
+  .text-item:hover{
+    border-color:rgba(37,99,235,.35);
+  }
+  .text-item:focus{
+    border-color:#2563eb;
+    background:rgba(37,99,235,.06);
+  }
 
   .pagenum{
     position:absolute;
@@ -357,6 +379,9 @@
     <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser">
       <svg viewBox="0 0 24 24"><path d="M20 20H8.5L3.7 15.2a2 2 0 0 1 0-2.8l9-9a2 2 0 0 1 2.8 0l5.5 5.5a2 2 0 0 1 0 2.8L11.5 20"/><path d="M7 12l5 5"/></svg>
     </button>
+    <button class="tool" data-tool="text" title="Text (T) — tap on the page, then type" aria-label="Text">
+      <svg viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+    </button>
   </div>
 
   <div class="divider"></div>
@@ -426,6 +451,10 @@
       <button data-export="pdf-all">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="14" x2="15" y2="14"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
         Download ALL pages as PDF
+      </button>
+      <button data-export="txt">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+        Export text as .txt
       </button>
       <label class="check">
         <input type="checkbox" id="withLines" checked>
@@ -503,19 +532,21 @@
   const HANDLE_HIT  = 14;
   const MIN_SIDE    = 30;
   const TWO_PAGE_MQ = '(min-width: 560px)';
-  const SWIPE_MIN   = 60;    // px horizontal travel to trigger page turn
-  const SWIPE_MAX_Y = 70;    // px vertical tolerance (must be mostly horizontal)
+  const SWIPE_MIN   = 60;
+  const SWIPE_MAX_Y = 70;
 
-  const toolSizes = { pen: 3, highlighter: 18, eraser: 24 };
+  const toolSizes = { pen: 3, highlighter: 18, eraser: 24, text: 3 };
 
   const state = {
     tool: 'pen',
     color: '#2b1a0e',
     size: 3,
-    strokes: [],
+    strokes: [],       // freehand + images
+    texts: [],         // {kind:'text', page, x, y, text, color, size, id}
     redo: [],
     current: null,
     selectedIndex: -1,
+    selectedTextId: null,
     dragMode: null,
     dragStart: null,
     currentPage: 0,
@@ -576,16 +607,29 @@
     return out;
   }
 
+  function serializeTexts() {
+    return state.texts.map(t => ({
+      kind: 'text',
+      page: t.page,
+      x: t.x, y: t.y,
+      text: t.text,
+      color: t.color,
+      size: t.size,
+      font: t.font
+    }));
+  }
+
   async function saveDoc() {
     if (!db) return;
     try {
       const data = {
-        version: 1,
+        version: 2,
         savedAt: Date.now(),
         pageCount: pages.length,
         currentPage: state.currentPage,
         layoutMode: state.layoutMode,
-        strokes: serializeStrokes()
+        strokes: serializeStrokes(),
+        texts: serializeTexts()
       };
       await new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, 'readwrite');
@@ -668,16 +712,19 @@
     const overlay = document.createElement('canvas');
     overlay.className = 'overlay';
 
+    const textLayer = document.createElement('div');
+    textLayer.className = 'text-layer';
+
     const num = document.createElement('div');
     num.className = 'pagenum';
 
-    sheet.append(hint, board, overlay, num);
+    sheet.append(hint, board, overlay, textLayer, num);
     paper.append(sheet);
     wrap.append(paper);
 
     const pg = {
       index: pages.length,
-      wrap, sheet, board, overlay, hint, num,
+      wrap, sheet, board, overlay, textLayer, hint, num,
       ctx: board.getContext('2d'),
       octx: overlay.getContext('2d'),
       dpr: 1
@@ -716,6 +763,10 @@
 
     state.strokes = state.strokes.filter(s => s.page !== index);
     for (const s of state.strokes) if (s.page > index) s.page -= 1;
+
+    state.texts = state.texts.filter(t => t.page !== index);
+    for (const t of state.texts) if (t.page > index) t.page -= 1;
+
     state.redo = [];
     state.current = null;
 
@@ -724,6 +775,7 @@
     if (state.currentPage >= pages.length) state.currentPage = pages.length - 1;
     if (state.selectedIndex >= state.strokes.length) state.selectedIndex = -1;
 
+    rebuildTextLayers();
     applyLayout();
     redrawAll();
     drawAllOverlays();
@@ -759,7 +811,7 @@
   }
 
   /* ============================================================
-     Rendering
+     Rendering — strokes + images on canvas
      ============================================================ */
   function redrawPage(pg) {
     const ctx = pg.ctx, dpr = pg.dpr;
@@ -845,7 +897,136 @@
   }
 
   /* ============================================================
-     Selection overlay
+     Text layer — DOM elements over the canvas
+     ============================================================ */
+  function textFontSize(t) {
+    return Math.max(10, t.size * 5);   // text uses the size slider as a scale
+  }
+
+  function buildTextElement(t) {
+    const el = document.createElement('div');
+    el.className = 'text-item';
+    el.contentEditable = 'true';
+    el.spellcheck = false;
+    el.dataset.textId = String(t.id);
+    el.textContent = t.text;
+
+    el.style.left = t.x + 'px';
+    el.style.top = t.y + 'px';
+    el.style.color = t.color;
+    el.style.fontSize = textFontSize(t) + 'px';
+    el.style.fontFamily = t.font;
+
+    el.addEventListener('focus', () => {
+      state.selectedTextId = t.id;
+    });
+
+    el.addEventListener('blur', () => {
+      const newText = el.textContent.replace(/\n+$/, '');
+      if (!newText.trim()) {
+        // Remove empty text items
+        removeText(t.id, false);
+      } else {
+        t.text = newText;
+        scheduleSave();
+      }
+    });
+
+    el.addEventListener('input', () => {
+      // Live update so it's saved even if the user never blurs
+      t.text = el.textContent;
+      scheduleSave();
+    });
+
+    el.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        el.blur();
+        return;
+      }
+      // Enter inserts a newline by default; Shift+Enter too.
+      // Backspace at the very start with empty content deletes the item.
+      if (e.key === 'Backspace' && el.textContent === '') {
+        e.preventDefault();
+        removeText(t.id, false);
+      }
+    });
+
+    // Prevent drawing when the user taps inside the text box
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+    });
+
+    return el;
+  }
+
+  function rebuildTextLayers() {
+    for (const pg of pages) pg.textLayer.innerHTML = '';
+
+    // Ensure each text item has a stable id
+    for (let i = 0; i < state.texts.length; i++) {
+      if (state.texts[i].id == null) state.texts[i].id = i + 1;
+    }
+
+    for (const t of state.texts) {
+      const pg = pages[t.page];
+      if (!pg) continue;
+      pg.textLayer.appendChild(buildTextElement(t));
+    }
+  }
+
+  function addTextAt(pageIndex, x, y) {
+    const id = (state.texts.reduce((m, t) => Math.max(m, t.id || 0), 0) || 0) + 1;
+    const t = {
+      kind: 'text',
+      id,
+      page: pageIndex,
+      x, y,
+      text: '',
+      color: state.color,
+      size: state.size,
+      font: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
+    };
+    state.texts.push(t);
+
+    const pg = pages[pageIndex];
+    if (pg) {
+      const el = buildTextElement(t);
+      pg.textLayer.appendChild(el);
+      el.focus();
+
+      // Place the caret inside
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    pg && pg.hint.classList.add('hide');
+    scheduleSave();
+    return t;
+  }
+
+  function removeText(id, save = true) {
+    state.texts = state.texts.filter(t => t.id !== id);
+    rebuildTextLayers();
+    if (save) scheduleSave();
+  }
+
+  function updateTextStyleForSelection() {
+    if (state.selectedTextId == null) return;
+    const t = state.texts.find(x => x.id === state.selectedTextId);
+    if (!t) return;
+    t.color = state.color;
+    t.size = state.size;
+    rebuildTextLayers();
+    scheduleSave();
+  }
+
+  /* ============================================================
+     Selection overlay (images only — text uses its own DOM border)
      ============================================================ */
   function getHandles(s) {
     return {
@@ -919,24 +1100,6 @@
   }
 
   /* ============================================================
-     Cursor feedback
-     ============================================================ */
-  function updateCursor(p, pg) {
-    const sel = state.selectedIndex >= 0 ? state.strokes[state.selectedIndex] : null;
-    if (sel && sel.kind === 'image' && sel.page === pg.index) {
-      for (const [name, hp] of Object.entries(getHandles(sel))) {
-        if (Math.hypot(p.x - hp.x, p.y - hp.y) <= HANDLE_HIT) {
-          pg.board.style.cursor =
-            (name === 'nw' || name === 'se') ? 'nwse-resize' : 'nesw-resize';
-          return;
-        }
-      }
-    }
-    pg.board.style.cursor = hitTestImages(p, pg.index) ? 'move'
-                          : (state.tool === 'eraser' ? 'cell' : 'crosshair');
-  }
-
-  /* ============================================================
      Pointer handlers
      ============================================================ */
   function onDown(e, pg) {
@@ -950,9 +1113,20 @@
       scheduleSave();
     }
 
-    try { pg.board.setPointerCapture(e.pointerId); } catch (_) {}
-
     const p = pointFrom(e, pg);
+
+    // If the text tool is active, tapping the page creates a text item
+    if (state.tool === 'text') {
+      // Deselect any selected image
+      if (state.selectedIndex >= 0) {
+        state.selectedIndex = -1;
+        drawAllOverlays();
+      }
+      addTextAt(pg.index, p.x, p.y);
+      return;
+    }
+
+    try { pg.board.setPointerCapture(e.pointerId); } catch (_) {}
 
     const handleHit = hitTestHandles(p, pg);
     if (handleHit) { startResize(handleHit.handle, handleHit.element, p); return; }
@@ -1019,6 +1193,25 @@
       s.points.push(pt);
       drawLiveTail(pg.ctx, s);
     }
+  }
+
+  function updateCursor(p, pg) {
+    if (state.tool === 'text') {
+      pg.board.style.cursor = 'text';
+      return;
+    }
+    const sel = state.selectedIndex >= 0 ? state.strokes[state.selectedIndex] : null;
+    if (sel && sel.kind === 'image' && sel.page === pg.index) {
+      for (const [name, hp] of Object.entries(getHandles(sel))) {
+        if (Math.hypot(p.x - hp.x, p.y - hp.y) <= HANDLE_HIT) {
+          pg.board.style.cursor =
+            (name === 'nw' || name === 'se') ? 'nwse-resize' : 'nesw-resize';
+          return;
+        }
+      }
+    }
+    pg.board.style.cursor = hitTestImages(p, pg.index) ? 'move'
+                          : (state.tool === 'eraser' ? 'cell' : 'crosshair');
   }
 
   function finishAny() {
@@ -1107,18 +1300,20 @@
      History + hints
      ============================================================ */
   function updateHistoryButtons() {
-    undoBtn.disabled = state.strokes.length === 0;
+    undoBtn.disabled = state.strokes.length === 0 && state.texts.length === 0;
     redoBtn.disabled = state.redo.length === 0;
   }
 
   function updateHints() {
     for (const pg of pages) {
-      const has = state.strokes.some(s => s.page === pg.index);
-      pg.hint.classList.toggle('hide', has);
+      const hasStroke = state.strokes.some(s => s.page === pg.index);
+      const hasText   = state.texts.some(t => t.page === pg.index);
+      pg.hint.classList.toggle('hide', hasStroke || hasText);
     }
   }
 
   function undo() {
+    // Undo a text removal/change isn't tracked; only strokes
     if (!state.strokes.length) return;
     state.redo.push(state.strokes.pop());
     state.selectedIndex = -1;
@@ -1141,7 +1336,8 @@
 
   document.getElementById('clear').addEventListener('click', () => {
     const targets = state.twoPage ? state.visiblePages.slice() : [state.currentPage];
-    const has = state.strokes.some(s => targets.includes(s.page));
+    const has = state.strokes.some(s => targets.includes(s.page))
+             || state.texts.some(t => targets.includes(t.page));
     if (!has) return;
 
     const label = targets.length > 1
@@ -1151,9 +1347,11 @@
     if (!confirm(`Clear ${label}? This cannot be undone.`)) return;
 
     state.strokes = state.strokes.filter(s => !targets.includes(s.page));
+    state.texts   = state.texts.filter(t => !targets.includes(t.page));
     state.redo = [];
     state.current = null;
     state.selectedIndex = -1;
+    rebuildTextLayers();
     redrawAll(); drawAllOverlays();
     updateHistoryButtons(); updateHints();
     scheduleSave();
@@ -1166,15 +1364,25 @@
     if (t === state.tool) return;
     toolSizes[state.tool] = state.size;
     state.tool = t;
-    state.size = toolSizes[t];
+    state.size = toolSizes[t] || 3;
     sizeEl.value = state.size;
     sizeLbl.textContent = state.size;
 
     document.querySelectorAll('.tool').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === t));
+
+    document.body.classList.toggle('text-mode', t === 'text');
+
     pages.forEach(pg => {
-      pg.board.style.cursor = t === 'eraser' ? 'cell' : 'crosshair';
+      pg.board.style.cursor =
+        t === 'text' ? 'text' :
+        t === 'eraser' ? 'cell' : 'crosshair';
     });
+
+    // When leaving the text tool, blur any focused text item
+    if (t !== 'text' && document.activeElement && document.activeElement.classList.contains('text-item')) {
+      document.activeElement.blur();
+    }
   }
 
   document.querySelectorAll('.tool').forEach(btn => {
@@ -1185,6 +1393,17 @@
     state.size = +sizeEl.value;
     toolSizes[state.tool] = state.size;
     sizeLbl.textContent = state.size;
+
+    // If a text item is selected, live-update its size
+    if (state.selectedTextId != null) {
+      const t = state.texts.find(x => x.id === state.selectedTextId);
+      if (t) {
+        t.size = state.size;
+        const el = document.querySelector(`.text-item[data-text-id="${t.id}"]`);
+        if (el) el.style.fontSize = textFontSize(t) + 'px';
+        scheduleSave();
+      }
+    }
   });
 
   function setColor(c) {
@@ -1192,6 +1411,17 @@
     document.querySelectorAll('.swatch[data-color]').forEach(s =>
       s.classList.toggle('active', s.dataset.color.toLowerCase() === c.toLowerCase()));
     if (state.tool === 'eraser') setTool('pen');
+
+    // If a text item is selected, live-update its color
+    if (state.selectedTextId != null) {
+      const t = state.texts.find(x => x.id === state.selectedTextId);
+      if (t) {
+        t.color = c;
+        const el = document.querySelector(`.text-item[data-text-id="${t.id}"]`);
+        if (el) el.style.color = c;
+        scheduleSave();
+      }
+    }
   }
 
   document.querySelectorAll('.swatch[data-color]').forEach(sw => {
@@ -1283,6 +1513,8 @@
 
   document.addEventListener('paste', (e) => {
     if (!e.clipboardData) return;
+    // If we're editing a text item, let the browser handle text paste
+    if (document.activeElement && document.activeElement.classList.contains('text-item')) return;
     const item = Array.from(e.clipboardData.items || [])
       .find(it => it.type && it.type.startsWith('image/'));
     if (item) {
@@ -1293,7 +1525,7 @@
   });
 
   /* ============================================================
-     Swipe-to-turn gesture (touch/pen only)
+     Swipe-to-turn gesture
      ============================================================ */
   const swipe = {
     active: false,
@@ -1304,9 +1536,9 @@
   };
 
   stage.addEventListener('pointerdown', (e) => {
-    // Ignore if the pointer started on an active element
     if (e.pointerType === 'mouse') return;
-    if (state.current || state.dragMode) return;   // busy drawing
+    if (state.current || state.dragMode) return;
+    if (state.tool === 'text') return;   // don't swipe while placing text
     swipe.active = true;
     swipe.pointerId = e.pointerId;
     swipe.startX = e.clientX;
@@ -1322,7 +1554,6 @@
     swipe.dx = e.clientX - swipe.startX;
     swipe.dy = e.clientY - swipe.startY;
 
-    // If we start drawing instead, cancel the swipe
     if (state.current) {
       swipe.active = false;
       book.classList.remove('dragging');
@@ -1330,11 +1561,8 @@
       return;
     }
 
-    // Only respond to mostly horizontal gestures
-    if (Math.abs(swipe.dy) > SWIPE_MAX_Y && Math.abs(swipe.dx) < SWIPE_MIN) {
-      return;
-    }
-    // Live drag feedback (resisted, capped)
+    if (Math.abs(swipe.dy) > SWIPE_MAX_Y && Math.abs(swipe.dx) < SWIPE_MIN) return;
+
     const capped = Math.max(-90, Math.min(90, swipe.dx * 0.45));
     book.style.transform = `translateX(${capped}px)`;
   }, { passive: true });
@@ -1346,14 +1574,13 @@
     const dx = swipe.dx;
     const dy = swipe.dy;
     const dt = Date.now() - swipe.startTime;
-    const velocity = Math.abs(dx) / Math.max(1, dt);   // px per ms
+    const velocity = Math.abs(dx) / Math.max(1, dt);
 
     swipe.active = false;
     swipe.pointerId = null;
     book.classList.remove('dragging');
     book.style.transform = '';
 
-    // Decide direction
     const horizontal = Math.abs(dx) > Math.abs(dy);
     const distanceOK = Math.abs(dx) > SWIPE_MIN;
     const velocityOK = velocity > 0.35 && Math.abs(dx) > 25;
@@ -1362,13 +1589,6 @@
     if (!horizontal || !verticalOK || (!distanceOK && !velocityOK)) return;
 
     if (dx < 0) {
-      // Swipe left → next
-      if (state.twoPage) {
-        const spread = Math.floor(state.currentPage / 2);
-        if ((spread + 1) * 2 < pages.length || ((spread + 1) * 2 === pages.length)) {
-          // allow landing on last single-page spread if it exists
-        }
-      }
       if (!nextBtn.disabled) {
         animateTurn('next');
         nextBtn.click();
@@ -1389,7 +1609,6 @@
 
   function animateTurn(direction) {
     book.classList.remove('turn-next', 'turn-prev');
-    // Force reflow so the animation restarts even if it just played
     void book.offsetWidth;
     book.classList.add(direction === 'next' ? 'turn-next' : 'turn-prev');
     setTimeout(() => {
@@ -1422,7 +1641,7 @@
   });
 
   /* ============================================================
-     Export — single view or all pages
+     Export
      ============================================================ */
   function addNoise(c, W, H) {
     const TS = 140;
@@ -1496,7 +1715,24 @@
     c.restore();
   }
 
-  // Render one page onto a canvas and return its JPEG data
+  // Draw all texts for a given page onto a canvas ctx (for export)
+  function drawTextsForPage(c, pageIndex, scale) {
+    for (const t of state.texts) {
+      if (t.page !== pageIndex) continue;
+      const fontSize = textFontSize(t) * scale;
+      c.save();
+      c.font = `${fontSize}px ${t.font}`;
+      c.fillStyle = t.color;
+      c.textBaseline = 'top';
+      const lines = String(t.text).split('\n');
+      const lineHeight = fontSize * 1.05;
+      lines.forEach((line, i) => {
+        c.fillText(line, t.x * scale, t.y * scale + i * lineHeight);
+      });
+      c.restore();
+    }
+  }
+
   function renderPageToJPEG(pi, withLines, withNumbers, scale) {
     const pg = pages[pi];
     if (!pg) return null;
@@ -1515,6 +1751,8 @@
     c.imageSmoothingQuality = 'high';
     c.drawImage(pg.board, 0, 0, out.width, out.height);
 
+    drawTextsForPage(c, pi, scale);
+
     if (withNumbers) drawPageNumber(c, out.width, out.height, scale, pi + 1);
 
     const dataUrl = out.toDataURL('image/jpeg', 0.92);
@@ -1522,7 +1760,6 @@
     return { bytes: jpegBytes, w: out.width, h: out.height };
   }
 
-  // Compose multiple pages side-by-side onto one canvas (for "current view")
   function compose(pageList, withLines, withNumbers, scale) {
     const pg0  = pages[pageList[0]];
     const wCss = pg0.board.width / pg0.dpr;
@@ -1550,13 +1787,13 @@
       c.translate(offX * scale, 0);
 
       paintParchment(c, W, H, scale, withLines, hCss);
-
       c.imageSmoothingEnabled = true;
       c.imageSmoothingQuality = 'high';
       c.drawImage(pg.board, 0, 0, W, H);
 
-      if (withNumbers) drawPageNumber(c, W, H, scale, pi + 1);
+      drawTextsForPage(c, pi, scale);
 
+      if (withNumbers) drawPageNumber(c, W, H, scale, pi + 1);
       c.restore();
     });
 
@@ -1591,12 +1828,27 @@
     const withNumbers = numbersCb.checked;
     const base = 'note-' + timestamp();
 
-    /* ---------- PDF containing ALL pages ---------- */
+    /* ---------- Plain text export ---------- */
+    if (type === 'txt') {
+      let out = '';
+      for (let i = 0; i < pages.length; i++) {
+        const pageTexts = state.texts
+          .filter(t => t.page === i)
+          .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+        const lines = pageTexts.map(t => t.text);
+        out += `Page ${i + 1}\n`;
+        out += '─'.repeat(40) + '\n';
+        out += (lines.length ? lines.join('\n') : '(empty)') + '\n\n';
+      }
+      const blob = new Blob([out], { type: 'text/plain;charset=utf-8' });
+      download(blob, base + '.txt');
+      return;
+    }
+
+    /* ---------- PDF: all pages ---------- */
     if (type === 'pdf-all') {
       busyText.textContent = 'Building PDF…';
       busy.classList.add('show');
-
-      // Give the browser a frame to paint the busy overlay first
       requestAnimationFrame(() => {
         setTimeout(() => {
           try {
@@ -1631,7 +1883,7 @@
 
     const dataUrl = out.toDataURL('image/jpeg', 0.92);
     const bytes = base64ToBytes(dataUrl.split(',')[1]);
-    download(buildPDF(bytes, out.width, out.height), base + '.pdf');
+    download(buildMultiPagePDF([{ bytes, w: out.width, h: out.height }]), base + '.pdf');
   }
 
   function base64ToBytes(b64) {
@@ -1641,20 +1893,8 @@
     return arr;
   }
 
-  /* ---------- Single-image PDF (kept for "current view") ---------- */
-  function buildPDF(jpegBytes, imgW, imgH) {
-    return buildMultiPagePDF([{ bytes: jpegBytes, w: imgW, h: imgH }]);
-  }
-
-  /* ---------- Multi-page PDF ----------
-     Each page is one JPEG image. We fit each image onto a
-     standard page (A4 landscape or portrait, depending on aspect)
-     while preserving the image's aspect ratio.
-  ---------------------------------------- */
   function buildMultiPagePDF(jpegPages) {
-    if (!jpegPages || !jpegPages.length) {
-      throw new Error('No pages to export.');
-    }
+    if (!jpegPages || !jpegPages.length) throw new Error('No pages to export.');
 
     const enc = new TextEncoder();
     const parts = [];
@@ -1664,68 +1904,37 @@
       parts.push(b); size += b.length;
     };
 
-    // Header (with binary marker)
     add(new Uint8Array([0x25,0x50,0x44,0x46,0x2D,0x31,0x2E,0x34,0x0A,0x25,0xE2,0xE3,0xCF,0xD3,0x0A]));
 
-    // Object numbering:
-    //   1 = Catalog
-    //   2 = Pages
-    //   3..N+2 = Page objects
-    //   N+3.. = Image XObjects,  then each content stream
-    //   (we interleave: for each page i, image = 3+N+i, content = 3+2N+i)
     const N = jpegPages.length;
+    const objCatalog = 1, objPages = 2;
+    const pageObjBase = 3, imageObjBase = 3 + N, contentBase = 3 + 2 * N;
 
-    const objCatalog   = 1;
-    const objPages     = 2;
-    const pageObjBase  = 3;
-    const imageObjBase = 3 + N;
-    const contentBase  = 3 + 2 * N;
-
-    // Precompute page dimensions (fit to A4)
-    const A4_LONG  = 841.89;
-    const A4_SHORT = 595.28;
-
+    const A4_LONG = 841.89, A4_SHORT = 595.28;
     const pageDims = jpegPages.map((jp) => {
-      const long  = Math.max(jp.w, jp.h);
-      const short = Math.min(jp.w, jp.h);
       let pageW, pageH;
-      if (jp.w >= jp.h) {
-        pageW = A4_LONG; pageH = A4_LONG * jp.h / jp.w;
-      } else {
-        pageW = A4_SHORT; pageH = A4_SHORT * jp.h / jp.w;
-      }
+      if (jp.w >= jp.h) { pageW = A4_LONG; pageH = A4_LONG * jp.h / jp.w; }
+      else              { pageW = A4_SHORT; pageH = A4_SHORT * jp.h / jp.w; }
       return { W: +pageW.toFixed(2), H: +pageH.toFixed(2) };
     });
 
-    // Build objects and track byte offsets
     const offsets = {};
+    const writeObj = (num, body) => { offsets[num] = size; add(`${num} 0 obj\n${body}\nendobj\n`); };
 
-    function writeObj(num, body) {
-      offsets[num] = size;
-      add(`${num} 0 obj\n${body}\nendobj\n`);
-    }
-
-    // 1: Catalog
     writeObj(objCatalog, `<< /Type /Catalog /Pages ${objPages} 0 R >>`);
 
-    // 2: Pages (kids = every page object)
     const kids = [];
     for (let i = 0; i < N; i++) kids.push(`${pageObjBase + i} 0 R`);
     writeObj(objPages, `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${N} >>`);
 
-    // 3..3+N-1: Page objects
     for (let i = 0; i < N; i++) {
-      const imgNum = imageObjBase + i;
-      const cNum   = contentBase + i;
+      const imgNum = imageObjBase + i, cNum = contentBase + i;
       const { W, H } = pageDims[i];
-      writeObj(
-        pageObjBase + i,
+      writeObj(pageObjBase + i,
         `<< /Type /Page /Parent ${objPages} 0 R /MediaBox [0 0 ${W} ${H}] `
-        + `/Resources << /XObject << /Im0 ${imgNum} 0 R >> >> /Contents ${cNum} 0 R >>`
-      );
+        + `/Resources << /XObject << /Im0 ${imgNum} 0 R >> >> /Contents ${cNum} 0 R >>`);
     }
 
-    // Image XObjects
     for (let i = 0; i < N; i++) {
       const jp = jpegPages[i];
       const num = imageObjBase + i;
@@ -1738,11 +1947,9 @@
       add('\nendstream\nendobj\n');
     }
 
-    // Content streams (one per page: draws the image full-bleed to the page)
     for (let i = 0; i < N; i++) {
       const { W, H } = pageDims[i];
-      const content = `q\n${W} 0 0 ${H} 0 0 cm\n/Im0 Do\nQ\n`;
-      const cb = enc.encode(content);
+      const cb = enc.encode(`q\n${W} 0 0 ${H} 0 0 cm\n/Im0 Do\nQ\n`);
       const num = contentBase + i;
       offsets[num] = size;
       add(`${num} 0 obj\n`);
@@ -1751,21 +1958,13 @@
       add('\nendstream\nendobj\n');
     }
 
-    // xref table
     const xrefPos = size;
-    const totalObjects = 2 + 2 * N + 1;   // 0 + catalog + pages + N pages + N images + N contents
-    // Actually count: 0 (free) + 1 catalog + 1 pages + N page + N image + N content = 3 + 3N
     const count = 3 + 3 * N;
-
-    let xref = `xref\n0 ${count}\n`;
-    xref += '0000000000 65535 f \n';
+    let xref = `xref\n0 ${count}\n0000000000 65535 f \n`;
     for (let i = 1; i < count; i++) {
-      const off = offsets[i] || 0;
-      xref += String(off).padStart(10, '0') + ' 00000 n \n';
+      xref += String(offsets[i] || 0).padStart(10, '0') + ' 00000 n \n';
     }
     add(xref);
-
-    // Trailer
     add(`trailer\n<< /Size ${count} /Root ${objCatalog} 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`);
 
     return new Blob(parts, { type: 'application/pdf' });
@@ -1783,7 +1982,6 @@
     else twoPage = mq.matches;
 
     if (pages.length < 2) twoPage = false;
-
     if (state.currentPage >= pages.length) state.currentPage = pages.length - 1;
     if (state.currentPage < 0) state.currentPage = 0;
 
@@ -1837,11 +2035,9 @@
 
   function updateExportNote() {
     const vis = getExportPages();
-    if (vis.length > 1) {
-      exportNote.textContent = `Current view: pages ${vis[0] + 1}–${vis[vis.length - 1] + 1}.`;
-    } else {
-      exportNote.textContent = `Current view: page ${vis[0] + 1}.`;
-    }
+    exportNote.textContent = (vis.length > 1)
+      ? `Current view: pages ${vis[0] + 1}–${vis[vis.length - 1] + 1}.`
+      : `Current view: page ${vis[0] + 1}.`;
   }
 
   if (mq.addEventListener) mq.addEventListener('change', () => {
@@ -1871,11 +2067,8 @@
 
     if (state.twoPage) {
       const spread = Math.floor(cur / 2);
-      const a = spread * 2;
-      const b = a + 1;
-      pageLabel.textContent = (b < n)
-        ? `${a + 1}–${b + 1} / ${n}`
-        : `${a + 1} / ${n}`;
+      const a = spread * 2, b = a + 1;
+      pageLabel.textContent = (b < n) ? `${a + 1}–${b + 1} / ${n}` : `${a + 1} / ${n}`;
       prevBtn.disabled = spread === 0;
       nextBtn.disabled = (spread + 1) * 2 >= n;
     } else {
@@ -1897,9 +2090,7 @@
     if (state.twoPage) {
       const spread = Math.floor(state.currentPage / 2);
       if (spread > 0) state.currentPage = (spread - 1) * 2;
-    } else if (state.currentPage > 0) {
-      state.currentPage--;
-    }
+    } else if (state.currentPage > 0) state.currentPage--;
     afterNav();
   });
 
@@ -1907,23 +2098,19 @@
     if (state.twoPage) {
       const spread = Math.floor(state.currentPage / 2);
       if ((spread + 1) * 2 < pages.length) state.currentPage = (spread + 1) * 2;
-    } else if (state.currentPage < pages.length - 1) {
-      state.currentPage++;
-    }
+    } else if (state.currentPage < pages.length - 1) state.currentPage++;
     afterNav();
   });
 
   addBtn.addEventListener('click', () => {
     const n = state.twoPage ? 2 : 1;
     for (let i = 0; i < n; i++) addPage(false);
-
     if (state.twoPage) {
       state.currentPage = pages.length - n;
       if (state.currentPage % 2 !== 0) state.currentPage -= 1;
     } else {
       state.currentPage = pages.length - 1;
     }
-
     applyLayout();
     drawAllOverlays();
     scheduleSave();
@@ -1931,21 +2118,13 @@
 
   delBtn.addEventListener('click', () => {
     if (pages.length <= 1) return;
-
     const targets = state.twoPage ? state.visiblePages.slice().reverse() : [state.currentPage];
     const label = targets.length > 1
       ? `pages ${Math.min(...targets) + 1}–${Math.max(...targets) + 1}`
       : `page ${targets[0] + 1}`;
-
-    if (pages.length - targets.length < 1) {
-      alert('You need at least one page.');
-      return;
-    }
-
+    if (pages.length - targets.length < 1) { alert('You need at least one page.'); return; }
     if (!confirm(`Delete ${label}? Everything on ${targets.length > 1 ? 'them' : 'it'} will be lost.`)) return;
-
     for (const t of targets) deletePage(t);
-
     if (state.currentPage >= pages.length) state.currentPage = pages.length - 1;
     applyLayout();
     drawAllOverlays();
@@ -1958,6 +2137,7 @@
   document.addEventListener('keydown', (e) => {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' && e.target.type === 'color') return;
+    if (document.activeElement && document.activeElement.classList.contains('text-item')) return;
 
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
@@ -1985,6 +2165,7 @@
       if (k === 'p') setTool('pen');
       else if (k === 'h') setTool('highlighter');
       else if (k === 'e') setTool('eraser');
+      else if (k === 't') { e.preventDefault(); setTool('text'); }
       else if (k === 'i') { e.preventDefault(); fileIn.click(); }
       else if (k === 'l') { e.preventDefault(); layoutBtn.click(); }
       else if (k === 'arrowleft')  { animateTurn('prev'); prevBtn.click(); }
@@ -2027,8 +2208,11 @@
       }
     }
 
-    const wanted = (saved && saved.pageCount) ? Math.max(2, saved.pageCount) : 2;
+    if (saved && Array.isArray(saved.texts)) {
+      state.texts = saved.texts.filter(t => t && typeof t.text === 'string');
+    }
 
+    const wanted = (saved && saved.pageCount) ? Math.max(2, saved.pageCount) : 2;
     for (let i = 0; i < wanted; i++) addPage(false);
 
     state.currentPage = (saved && Number.isInteger(saved.currentPage))
@@ -2038,6 +2222,8 @@
     if (saved && saved.layoutMode) state.layoutMode = saved.layoutMode;
 
     state.loaded = true;
+
+    rebuildTextLayers();
     applyLayout();
     updateHistoryButtons();
     updateHints();
@@ -2063,7 +2249,7 @@
   });
 
   /* ============================================================
-     PWA — service worker + install prompt
+     PWA
      ============================================================ */
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
