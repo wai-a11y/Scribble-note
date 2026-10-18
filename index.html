@@ -125,7 +125,7 @@
   .dropdown{
     position:absolute;right:0;top:calc(100% + 8px);
     background:#111827;border:1px solid rgba(255,255,255,.1);
-    border-radius:12px;padding:6px;min-width:265px;
+    border-radius:12px;padding:6px;min-width:280px;
     box-shadow:0 20px 40px rgba(0,0,0,.55);
     display:none;flex-direction:column;gap:2px;z-index:50;
   }
@@ -387,7 +387,6 @@
     transform:translateX(-50%) translateY(0);
   }
 
-  /* ---------- Sidebar ---------- */
   .sidebar-backdrop{
     position:fixed;inset:0;
     background:rgba(0,0,0,.55);
@@ -616,6 +615,21 @@
         <input type="checkbox" id="askLocation">
         Ask where to save (if supported)
       </label>
+      <div class="note" style="border-top:1px solid rgba(255,255,255,.08);margin-top:6px;padding-top:8px;color:#93c5fd;font-weight:600;letter-spacing:.3px;text-transform:uppercase;font-size:10.5px;">
+        Backups
+      </div>
+      <button data-export="json">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Back up THIS notebook (.json)
+      </button>
+      <button data-export="json-all">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
+        Back up ALL notebooks (.json)
+      </button>
+      <button data-export="import">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Import from backup (.json)
+      </button>
       <div class="note" id="exportNote">Exports the current view.</div>
     </div>
   </div>
@@ -632,6 +646,8 @@
   </div>
   <ul class="sidebar-list" id="sidebarList"></ul>
 </aside>
+
+<input type="file" id="importInput" accept=".json,application/json" hidden>
 
 <div class="stage" id="stage">
   <div class="book" id="book"></div>
@@ -682,6 +698,7 @@
   const numbersCb  = document.getElementById('withNumbers');
   const askCb      = document.getElementById('askLocation');
   const fileIn     = document.getElementById('fileInput');
+  const importIn   = document.getElementById('importInput');
   const exportNote = document.getElementById('exportNote');
   const prevBtn    = document.getElementById('prevPage');
   const nextBtn    = document.getElementById('nextPage');
@@ -735,9 +752,6 @@
 
   const pages = [];
 
-  /* ============================================================
-     Toast
-     ============================================================ */
   let toastTimer = null;
   function showToast(msg, ms = 2400) {
     if (!toastEl) return;
@@ -748,13 +762,13 @@
   }
 
   /* ============================================================
-     IndexedDB — multi-store
+     IndexedDB
      ============================================================ */
   const DB_NAME = 'scribble-notepad';
   const DB_VERSION = 2;
-  const STORE_DOC = 'doc';                 // legacy single-doc store
-  const STORE_NOTEBOOKS = 'notebooks';     // key: id, value: { doc, updatedAt }
-  const STORE_META = 'meta';               // key: id, value: { id, title, ... }
+  const STORE_DOC = 'doc';
+  const STORE_NOTEBOOKS = 'notebooks';
+  const STORE_META = 'meta';
 
   let db = null;
 
@@ -809,9 +823,6 @@
     });
   }
 
-  /* ============================================================
-     Serialization
-     ============================================================ */
   function serializeStrokes() {
     const out = [];
     for (const s of state.strokes) {
@@ -861,9 +872,6 @@
     };
   }
 
-  /* ============================================================
-     Save / Load notebooks
-     ============================================================ */
   async function saveCurrentNotebook() {
     if (!db || !state.notebookId || state.loading || !state.loaded) return;
     try {
@@ -908,7 +916,6 @@
       const doc = record.doc || {};
       const meta = (await txGet(STORE_META, id)) || {};
 
-      // Reset state
       state.notebookId = id;
       state.notebookTitle = meta.title || 'Untitled';
       state.strokes = [];
@@ -920,7 +927,6 @@
       state.selectedIndex = -1;
       state.selectedTextId = null;
 
-      // Load strokes (async image decode)
       const imageLoads = [];
       if (Array.isArray(doc.strokes)) {
         for (const s of doc.strokes) {
@@ -954,7 +960,6 @@
       if (Number.isFinite(doc.textSize)) textSize = doc.textSize;
       if (doc.layoutMode) state.layoutMode = doc.layoutMode;
 
-      // Rebuild pages from scratch
       for (const pg of pages) {
         ro.unobserve(pg.sheet);
         pg.wrap.remove();
@@ -1066,9 +1071,6 @@
     closeSidebar();
   }
 
-  /* ============================================================
-     Save debouncing + flash
-     ============================================================ */
   let saveTimer = null;
   function scheduleSave() {
     clearTimeout(saveTimer);
@@ -1205,9 +1207,6 @@
     });
   }
 
-  /* ============================================================
-     Sizing / rendering
-     ============================================================ */
   function resizePage(pg) {
     const r = pg.sheet.getBoundingClientRect();
     const w = Math.max(1, Math.round(r.width));
@@ -1306,9 +1305,6 @@
     ctx.restore();
   }
 
-  /* ============================================================
-     Text layer
-     ============================================================ */
   function textFontSize(t) {
     return Math.max(12, t.size * 5);
   }
@@ -1449,9 +1445,6 @@
     if (save) scheduleSave();
   }
 
-  /* ============================================================
-     Image selection overlay
-     ============================================================ */
   function getHandles(s) {
     return {
       nw: { x: s.x,        y: s.y },
@@ -1491,9 +1484,6 @@
 
   function drawAllOverlays() { pages.forEach(drawOverlay); }
 
-  /* ============================================================
-     Hit testing
-     ============================================================ */
   function pointFrom(e, pg) {
     const r = pg.board.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -1523,9 +1513,6 @@
     return null;
   }
 
-  /* ============================================================
-     Pointer handlers
-     ============================================================ */
   function onDown(e, pg) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
@@ -1656,9 +1643,6 @@
   window.addEventListener('pointerup', finishAny);
   window.addEventListener('pointercancel', finishAny);
 
-  /* ============================================================
-     Move / resize
-     ============================================================ */
   function startMove(s, p) {
     state.dragMode = 'move';
     state.dragStart = { x: s.x, y: s.y, px: p.x, py: p.y };
@@ -1715,9 +1699,6 @@
     s.w = newW; s.h = newH;
   }
 
-  /* ============================================================
-     History / hints
-     ============================================================ */
   function updateHistoryButtons() {
     undoBtn.disabled = state.strokes.length === 0 && state.texts.length === 0;
     redoBtn.disabled = state.redo.length === 0;
@@ -1775,9 +1756,6 @@
     scheduleSave();
   });
 
-  /* ============================================================
-     Tool / color / size
-     ============================================================ */
   function setTool(t) {
     if (t === state.tool) return;
     toolSizes[state.tool] = state.size;
@@ -1863,9 +1841,6 @@
     if (state.tool === 'eraser') setTool('pen');
   });
 
-  /* ============================================================
-     Image insert
-     ============================================================ */
   document.getElementById('insertImg').addEventListener('click', () => fileIn.click());
 
   fileIn.addEventListener('change', () => {
@@ -1951,9 +1926,6 @@
     }
   });
 
-  /* ============================================================
-     Swipe to turn
-     ============================================================ */
   const swipe = {
     active: false, startX: 0, startY: 0, dx: 0, dy: 0,
     pointerId: null, startTime: 0
@@ -2034,9 +2006,6 @@
     }, 420);
   }
 
-  /* ============================================================
-     Sidebar
-     ============================================================ */
   function openSidebar() {
     document.body.classList.add('sidebar-open');
     document.getElementById('sidebar').setAttribute('aria-hidden', 'false');
@@ -2174,9 +2143,6 @@
     }
   });
 
-  /* ============================================================
-     Save menu
-     ============================================================ */
   saveBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const open = dropdown.classList.toggle('open');
@@ -2198,9 +2164,6 @@
     });
   });
 
-  /* ============================================================
-     Export
-     ============================================================ */
   async function saveBlob(blob, filename, mimeHint) {
     const usePicker = askCb.checked && supportsSavePicker;
 
@@ -2409,6 +2372,65 @@
     const withNumbers = numbersCb.checked;
     const base = (state.notebookTitle || 'note').replace(/[^\w\-]+/g, '_') + '-' + timestamp();
 
+    /* ---------- Backup: this notebook ---------- */
+    if (type === 'json') {
+      const doc = buildDoc();
+      const payload = {
+        type: 'scribble-notebook',
+        formatVersion: 1,
+        title: state.notebookTitle || 'Untitled',
+        exportedAt: new Date().toISOString(),
+        doc
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      await saveBlob(blob, base + '.json', 'application/json');
+      return;
+    }
+
+    /* ---------- Backup: ALL notebooks ---------- */
+    if (type === 'json-all') {
+      busyText.textContent = 'Bundling notebooks…';
+      busy.classList.add('show');
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 30)));
+
+      try {
+        const metas = await txGetAll(STORE_META);
+        const bundle = {
+          type: 'scribble-bundle',
+          formatVersion: 1,
+          exportedAt: new Date().toISOString(),
+          notebooks: []
+        };
+
+        for (const meta of metas) {
+          const rec = await txGet(STORE_NOTEBOOKS, meta.id);
+          if (!rec || !rec.doc) continue;
+          bundle.notebooks.push({
+            title: meta.title || 'Untitled',
+            createdAt: meta.createdAt || Date.now(),
+            updatedAt: meta.updatedAt || Date.now(),
+            doc: rec.doc
+          });
+        }
+
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+        await saveBlob(blob, 'scribble-backup-' + timestamp() + '.json', 'application/json');
+      } catch (err) {
+        console.warn(err);
+        alert('Backup failed: ' + err.message);
+      } finally {
+        busy.classList.remove('show');
+      }
+      return;
+    }
+
+    /* ---------- Import from JSON ---------- */
+    if (type === 'import') {
+      importIn.click();
+      return;
+    }
+
+    /* ---------- Text ---------- */
     if (type === 'txt') {
       let out = '';
       for (let i = 0; i < pages.length; i++) {
@@ -2424,6 +2446,7 @@
       return;
     }
 
+    /* ---------- PDF: all pages ---------- */
     if (type === 'pdf-all') {
       busyText.textContent = 'Building PDF…';
       busy.classList.add('show');
@@ -2448,6 +2471,7 @@
       return;
     }
 
+    /* ---------- PNG / PDF: current view ---------- */
     const pageList = getExportPages().filter(i => pages[i]);
     if (!pageList.length) return;
     const out = compose(pageList, withLines, withNumbers, 2);
@@ -2553,6 +2577,97 @@
   }
 
   /* ============================================================
+     Import from JSON file
+     ============================================================ */
+  importIn.addEventListener('change', async () => {
+    const f = importIn.files && importIn.files[0];
+    importIn.value = '';
+    if (!f) return;
+    await handleImportFile(f);
+  });
+
+  async function handleImportFile(file) {
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      alert('Please choose a .json backup file.');
+      return;
+    }
+
+    let text;
+    try {
+      text = await file.text();
+    } catch (err) {
+      alert('Could not read the file.');
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      alert('Not a valid JSON file.');
+      return;
+    }
+
+    // Single notebook
+    if (parsed && parsed.type === 'scribble-notebook' && parsed.doc) {
+      if (!confirm(`Import "${parsed.title || 'Untitled'}" as a new notebook?`)) return;
+      await importOneNotebook(parsed.title || 'Untitled', parsed.doc);
+      showToast('Imported "' + (parsed.title || 'Untitled') + '"');
+      return;
+    }
+
+    // Bundle of notebooks
+    if (parsed && parsed.type === 'scribble-bundle' && Array.isArray(parsed.notebooks)) {
+      if (!parsed.notebooks.length) {
+        alert('This backup is empty.');
+        return;
+      }
+      if (!confirm(`Import ${parsed.notebooks.length} notebook(s) from this backup?`)) return;
+
+      for (const nb of parsed.notebooks) {
+        if (nb && nb.doc) {
+          await importOneNotebook(nb.title || 'Imported', nb.doc);
+        }
+      }
+      showToast(`Imported ${parsed.notebooks.length} notebook(s)`);
+      return;
+    }
+
+    // Legacy / raw doc format (in case the user has an old export)
+    if (parsed && Array.isArray(parsed.strokes)) {
+      if (!confirm('This looks like a raw notebook export. Import as a new notebook?')) return;
+      await importOneNotebook('Imported', parsed);
+      showToast('Imported notebook');
+      return;
+    }
+
+    alert('Unrecognized backup format.');
+  }
+
+  async function importOneNotebook(title, doc) {
+    if (!db) return;
+
+    await saveCurrentNotebook();
+
+    const id = 'nb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const now = Date.now();
+
+    await txPut(STORE_NOTEBOOKS, id, { doc, updatedAt: now });
+    await txPut(STORE_META, id, {
+      id,
+      title: title || 'Imported',
+      createdAt: now,
+      updatedAt: now,
+      pageCount: doc.pageCount || 2
+    });
+
+    await loadNotebook(id);
+    try { localStorage.setItem('scribble:lastNotebook', id); } catch (_) {}
+    updateNotebookTitleUI();
+    await renderSidebarList();
+  }
+
+  /* ============================================================
      Layout
      ============================================================ */
   const mq = window.matchMedia(TWO_PAGE_MQ);
@@ -2643,9 +2758,6 @@
     });
   }
 
-  /* ============================================================
-     Pager
-     ============================================================ */
   function updatePager() {
     const n = pages.length;
     const cur = state.currentPage;
@@ -2716,9 +2828,6 @@
     scheduleSave();
   });
 
-  /* ============================================================
-     Keyboard shortcuts
-     ============================================================ */
   document.addEventListener('keydown', (e) => {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' && e.target.type === 'color') return;
@@ -2759,13 +2868,9 @@
     }
   });
 
-  /* ============================================================
-     Boot
-     ============================================================ */
   async function boot() {
     db = await openDB();
 
-    // Migration from old single-doc format
     const existingMeta = await txGetAll(STORE_META);
     if (existingMeta.length === 0) {
       const oldDoc = await txGet(STORE_DOC, 'main');
@@ -2782,7 +2887,6 @@
       }
     }
 
-    // Determine which notebook to open
     let all = await txGetAll(STORE_META);
 
     if (all.length === 0) {
@@ -2816,9 +2920,6 @@
     }, 250);
   });
 
-  /* ============================================================
-     PWA
-     ============================================================ */
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('./sw.js').catch((err) => {
