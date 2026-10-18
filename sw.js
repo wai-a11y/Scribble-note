@@ -1,7 +1,7 @@
 /* Scribble Notepad — Service Worker
    Bump CACHE version whenever you update index.html. */
 
-const CACHE = 'scribble-v8';
+const CACHE = 'scribble-v9';
 const ASSETS = [
   './',
   './index.html',
